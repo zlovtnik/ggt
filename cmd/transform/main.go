@@ -79,12 +79,32 @@ func main() {
 	worker := startPipelineWorker(ctx, logger, metricsCollector)
 	coordinator.Register("pipeline worker", shutdown.ShutdownFunc(worker.Stop))
 
-	healthServer := health.NewServer(cfg.Service.HealthPort, logger)
+	healthServer, err := health.NewServer(cfg.Service.HealthPort, logger)
+	if err != nil {
+		logger.Error("failed to create health server", zap.Error(err))
+		os.Exit(1)
+	}
 	if healthServer != nil {
 		if err := healthServer.AddCheck("pipeline worker", worker.HealthCheck); err != nil {
 			logger.Warn("failed to register health check", zap.Error(err))
 		}
-		healthServer.Start(cancel)
+		ready, errCh := healthServer.Start(cancel)
+		go func() {
+			select {
+			case <-ready:
+				logger.Info("health server ready", zap.Int("port", cfg.Service.HealthPort))
+			case err := <-errCh:
+				if err != nil {
+					logger.Error("health server failed to start", zap.Error(err))
+				}
+				return
+			}
+			for err := range errCh {
+				if err != nil {
+					logger.Error("health server error", zap.Error(err))
+				}
+			}
+		}()
 		coordinator.Register("health server", healthServer)
 	}
 

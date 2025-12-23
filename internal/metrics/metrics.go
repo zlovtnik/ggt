@@ -56,7 +56,9 @@ func transformHistogramOpts(namespace, subsystem string, buckets map[string][]fl
 		Name:      "transform_duration_seconds",
 		Help:      "Duration of each transform stage",
 	}
-	if custom := customBuckets(buckets, "latency"); len(custom) > 0 {
+	if custom := customBuckets(buckets, "transform_latency"); len(custom) > 0 {
+		opts.Buckets = custom
+	} else if custom := customBuckets(buckets, "latency"); len(custom) > 0 {
 		opts.Buckets = custom
 	} else {
 		opts.Buckets = prometheus.ExponentialBuckets(0.001, 2, 10)
@@ -71,7 +73,9 @@ func pipelineHistogramOpts(namespace, subsystem string, buckets map[string][]flo
 		Name:      "pipeline_duration_seconds",
 		Help:      "End-to-end pipeline duration",
 	}
-	if custom := customBuckets(buckets, "latency"); len(custom) > 0 {
+	if custom := customBuckets(buckets, "pipeline_latency"); len(custom) > 0 {
+		opts.Buckets = custom
+	} else if custom := customBuckets(buckets, "latency"); len(custom) > 0 {
 		opts.Buckets = custom
 	} else {
 		opts.Buckets = prometheus.ExponentialBuckets(0.001, 2, 10)

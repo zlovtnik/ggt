@@ -15,6 +15,21 @@ type ProducerConfig struct {
 	Acks    string
 }
 
+// parseAcks converts string acks value to kgo.Acks
+func parseAcks(acks string) kgo.Acks {
+	switch acks {
+	case "0":
+		return kgo.NoAck()
+	case "1":
+		return kgo.LeaderAck()
+	case "all":
+		return kgo.AllISRAcks()
+	default:
+		// Default to all acks for safety
+		return kgo.AllISRAcks()
+	}
+}
+
 // Producer is a scaffold for a franz-go backed producer. Methods are
 // intentionally minimal and act as a starting point for batching,
 // compression and retry logic.
@@ -35,6 +50,7 @@ func NewProducer(cfg ProducerConfig, logger *zap.Logger) (*Producer, error) {
 
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(cfg.Brokers...),
+		kgo.RequiredAcks(parseAcks(cfg.Acks)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create franz-go client: %w", err)
@@ -54,8 +70,10 @@ func (p *Producer) Send(ctx context.Context, topic string, key, value []byte) er
 	_ = key
 	_ = value
 	// simulate small delay for pipeline compatibility
+	timer := time.NewTimer(1 * time.Millisecond)
+	defer timer.Stop()
 	select {
-	case <-time.After(1 * time.Millisecond):
+	case <-timer.C:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -64,7 +82,7 @@ func (p *Producer) Send(ctx context.Context, topic string, key, value []byte) er
 
 // Close shuts down the producer client.
 func (p *Producer) Close() error {
-	if p == nil {
+	if p == nil || p.client == nil {
 		return nil
 	}
 	p.client.Close()

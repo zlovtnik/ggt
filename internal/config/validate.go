@@ -12,16 +12,16 @@ func (cfg Config) Validate() error {
 		return errors.New("service.name is required")
 	}
 	if !validLogLevel(cfg.Service.LogLevel) {
-		return fmt.Errorf("service.log_level must be one of debug, info, warn, error")
+		return fmt.Errorf("service.log_level must be one of debug, info, warn, error, dpanic, panic, fatal")
 	}
 	if cfg.Service.ShutdownTimeout <= 0 {
 		return errors.New("service.shutdown_timeout must be greater than zero")
 	}
-	if cfg.Service.MetricsPort < 0 {
-		return errors.New("service.metrics_port must be zero or positive")
+	if cfg.Service.MetricsPort < 0 || cfg.Service.MetricsPort > 65535 {
+		return errors.New("service.metrics_port must be zero (disabled) or in range 1-65535")
 	}
-	if cfg.Service.HealthPort < 0 {
-		return errors.New("service.health_port must be zero or positive")
+	if cfg.Service.HealthPort < 0 || cfg.Service.HealthPort > 65535 {
+		return errors.New("service.health_port must be zero (disabled) or in range 1-65535")
 	}
 	if len(cfg.Kafka.Consumer.Brokers) == 0 {
 		return errors.New("kafka.consumer.brokers must contain at least one broker")

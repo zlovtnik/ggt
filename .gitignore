@@ -43,7 +43,6 @@ configs/config.yaml
 *.tmp
 
 # Tooling caches
-.golangci.yml
 .golangci-cache/
 .cache/
 

@@ -7,9 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/twmb/franz-go/pkg/kgo"
+	"go.uber.org/zap"
 )
 
 // ConsumerConfig contains basic configuration for the consumer wrapper.
@@ -19,7 +18,9 @@ type ConsumerConfig struct {
 	Topics  []string
 	// HandlerTimeout, if set, limits how long a handler invocation may run.
 	// If zero, a sensible default (30s) is used.
-	HandlerTimeout time.Duration
+	HandlerTimeout  time.Duration
+	FetchMaxRecords int
+	PollIntervalMs  int
 }
 
 // PartitionAssignment is a lightweight representation of a topic/partition
@@ -49,6 +50,7 @@ type Consumer struct {
 	closeOnce      sync.Once
 	started        uint32
 	handlerTimeout time.Duration
+	errCh          chan error
 }
 
 // NewConsumer constructs a consumer wrapper backed by franz-go. It
@@ -86,9 +88,7 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 					assigned = append(assigned, PartitionAssignment{Topic: t, Partition: p})
 				}
 			}
-			if c != nil {
-				c.notifyRebalance(assigned, nil)
-			}
+			c.notifyRebalance(assigned, nil)
 		}),
 		kgo.OnPartitionsRevoked(func(ctx context.Context, cl *kgo.Client, rev map[string][]int32) {
 			var revoked []PartitionAssignment
@@ -97,9 +97,7 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 					revoked = append(revoked, PartitionAssignment{Topic: t, Partition: p})
 				}
 			}
-			if c != nil {
-				c.notifyRebalance(nil, revoked)
-			}
+			c.notifyRebalance(nil, revoked)
 		}),
 		kgo.OnPartitionsLost(func(ctx context.Context, cl *kgo.Client, lost map[string][]int32) {
 			var revoked []PartitionAssignment
@@ -108,9 +106,7 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 					revoked = append(revoked, PartitionAssignment{Topic: t, Partition: p})
 				}
 			}
-			if c != nil {
-				c.notifyRebalance(nil, revoked)
-			}
+			c.notifyRebalance(nil, revoked)
 		}),
 	}
 
@@ -122,6 +118,7 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 
 	c.client = client
 	c.done = make(chan struct{})
+	c.errCh = make(chan error, 1) // buffered to avoid blocking
 	if cfg.HandlerTimeout > 0 {
 		c.handlerTimeout = cfg.HandlerTimeout
 	} else {
@@ -165,7 +162,11 @@ func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
 			}
 
 			// Poll for records (bounded number)
-			fetches := c.client.PollRecords(c.ctx, 1024)
+			fetchMax := c.cfg.FetchMaxRecords
+			if fetchMax <= 0 {
+				fetchMax = 1024
+			}
+			fetches := c.client.PollRecords(c.ctx, fetchMax)
 			// log partition errors
 			fetches.EachError(func(topic string, partition int32, err error) {
 				c.logger.Error("fetch error", zap.String("topic", topic), zap.Int32("partition", partition), zap.Error(err))
@@ -179,15 +180,14 @@ func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
 					fp.EachRecord(func(r *kgo.Record) {
 						// Wrap handler invocation with a timeout derived from consumer context
 						hctx, hcancel := context.WithTimeout(c.ctx, c.handlerTimeout)
+						defer hcancel()
 						// ensure we don't leak timers — call cancel after handler returns
 						if err := handler(hctx, r.Value); err != nil {
-							hcancel()
 							c.logger.Error("handler error; record not committed", zap.Error(err), zap.String("topic", r.Topic), zap.Int32("partition", r.Partition), zap.Int64("offset", r.Offset))
 							// record the error and abort after this fetch iteration
 							abortErr = err
 							return
 						}
-						hcancel()
 
 						// Commit this record on success (commit-on-success semantics)
 						if err := c.client.CommitRecords(c.ctx, r); err != nil {
@@ -199,12 +199,21 @@ func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
 
 			if abortErr != nil {
 				// abort the fetch loop so callers can handle the error (via consumer stop or higher-level retry)
-				c.logger.Warn("aborting fetch iteration due to handler error")
+				c.logger.Warn("aborting fetch iteration due to handler error", zap.Error(abortErr))
+				select {
+				case c.errCh <- abortErr:
+				default:
+					// errCh is buffered, but avoid blocking if it's full
+				}
 				break fetchLoop
 			}
 
 			// small sleep to avoid hot-loop in edge cases
-			time.Sleep(10 * time.Millisecond)
+			pollInterval := c.cfg.PollIntervalMs
+			if pollInterval <= 0 {
+				pollInterval = 10
+			}
+			time.Sleep(time.Duration(pollInterval) * time.Millisecond)
 		}
 	}()
 
@@ -260,4 +269,10 @@ func (c *Consumer) Stop(ctx context.Context) error {
 		}
 	})
 	return nil
+}
+
+// Errors returns a channel that receives handler errors. Callers should
+// select on this channel to detect and handle processing failures.
+func (c *Consumer) Errors() <-chan error {
+	return c.errCh
 }

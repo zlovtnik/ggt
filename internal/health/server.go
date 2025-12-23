@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -30,9 +31,12 @@ type namedCheck struct {
 }
 
 // NewServer builds an HTTP server that listens on the provided port.
-func NewServer(port int, logger *zap.Logger) *Server {
-	if port <= 0 || logger == nil {
-		return nil
+func NewServer(port int, logger *zap.Logger) (*Server, error) {
+	if port < 1 || port > 65535 {
+		return nil, fmt.Errorf("invalid port: must be 1-65535")
+	}
+	if logger == nil {
+		return nil, fmt.Errorf("nil logger provided")
 	}
 	mux := http.NewServeMux()
 	hs := &Server{
@@ -47,7 +51,7 @@ func NewServer(port int, logger *zap.Logger) *Server {
 		port:   port,
 	}
 	mux.HandleFunc("/healthz", hs.handleHealth)
-	return hs
+	return hs, nil
 }
 
 // AddCheck registers a named check that runs during /healthz requests.
@@ -71,20 +75,42 @@ func (s *Server) AddCheck(name string, check CheckFunc) error {
 	return nil
 }
 
-// Start begins serving health endpoints in the background.
-func (s *Server) Start(cancel context.CancelFunc) {
+// Start attempts to bind to the configured address and, on success, returns
+// a ready channel that is closed when listening begins along with an
+// err channel that reports any startup or runtime failures encountered by
+// the server. Callers can wait on the channels to detect readiness or
+// failure before proceeding.
+func (s *Server) Start(cancel context.CancelFunc) (<-chan struct{}, <-chan error) {
+	ready := make(chan struct{})
+	errCh := make(chan error, 1)
 	if s == nil || s.httpServer == nil {
-		return
+		if s != nil && s.logger != nil {
+			s.logger.Error("cannot start health server: server or httpServer is nil")
+		}
+		errCh <- fmt.Errorf("health server not configured")
+		close(errCh)
+		return ready, errCh
 	}
+
+	listener, err := net.Listen("tcp", s.httpServer.Addr)
+	if err != nil {
+		errCh <- err
+		close(errCh)
+		return ready, errCh
+	}
+	close(ready)
 	go func() {
+		defer close(errCh)
 		s.logger.Info("starting health server", zap.Int("port", s.port))
-		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("health server terminated unexpectedly", zap.Error(err))
+		if serveErr := s.httpServer.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			errCh <- serveErr
+			s.logger.Error("health server terminated unexpectedly", zap.Error(serveErr))
 			if cancel != nil {
 				cancel()
 			}
 		}
 	}()
+	return ready, errCh
 }
 
 // Shutdown gracefully stops the health server.
@@ -104,7 +130,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	for _, check := range checks {
 		if err := check.check(ctx); err != nil {
 			s.logger.Warn("health check failed", zap.String("check", check.name), zap.Error(err))
-			http.Error(w, fmt.Sprintf("%s: %v", check.name, err), http.StatusServiceUnavailable)
+			http.Error(w, "unhealthy", http.StatusServiceUnavailable)
 			return
 		}
 	}

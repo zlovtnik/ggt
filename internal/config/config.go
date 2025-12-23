@@ -1,6 +1,8 @@
 package config
 
-import "time"
+import (
+	"time"
+)
 
 // ServiceConfig captures the top-level service parameters.
 type ServiceConfig struct {
@@ -19,6 +21,18 @@ type ConsumerConfig struct {
 	MaxPollInterval  string   `yaml:"max_poll_interval" json:"max_poll_interval"`
 	AutoOffsetReset  string   `yaml:"auto_offset_reset" json:"auto_offset_reset"`
 	EnableAutoCommit bool     `yaml:"enable_auto_commit" json:"enable_auto_commit"`
+	FetchMaxRecords  int      `yaml:"fetch_max_records" json:"fetch_max_records"`
+	PollIntervalMs   int      `yaml:"poll_interval_ms" json:"poll_interval_ms"`
+}
+
+// ParsedSessionTimeout returns the parsed session timeout duration.
+func (c ConsumerConfig) ParsedSessionTimeout() (time.Duration, error) {
+	return time.ParseDuration(c.SessionTimeout)
+}
+
+// ParsedMaxPollInterval returns the parsed max poll interval duration.
+func (c ConsumerConfig) ParsedMaxPollInterval() (time.Duration, error) {
+	return time.ParseDuration(c.MaxPollInterval)
 }
 
 type ProducerConfig struct {
@@ -37,8 +51,8 @@ type KafkaConfig struct {
 }
 
 type TransformDescriptor struct {
-	Type   string                 `yaml:"type" json:"type"`
-	Config map[string]interface{} `yaml:"config" json:"config"`
+	Type   string      `yaml:"type" json:"type"`
+	Config interface{} `yaml:"config" json:"config"`
 }
 
 type PipelineConfig struct {

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yaml/go-yaml"
+	"go.yaml.in/yaml/v3"
 )
 
 const (
-	DefaultConfigPath       = "configs/config.example.yaml"
+	DefaultConfigPath       = "configs/config.yaml"
 	ConfigPathEnvKey        = "TRANSFORM_CONFIG_PATH"
 	defaultServiceName      = "transform-service"
 	defaultLogLevel         = "info"
@@ -53,7 +53,9 @@ func unmarshalConfig(path string, data []byte, cfg *Config) error {
 			return fmt.Errorf("unmarshal json config: %w", err)
 		}
 	case ".yaml", ".yml":
-		fallthrough
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("unmarshal yaml config: %w", err)
+		}
 	default:
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			return fmt.Errorf("unmarshal yaml config: %w", err)

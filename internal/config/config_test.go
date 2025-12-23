@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -41,18 +42,25 @@ func TestConfigValidateFails(t *testing.T) {
 			expectPart: "shutdown_timeout",
 		},
 		{
-			name: "no consumer brokers",
+			name: "no producer brokers",
 			mutate: func(c *Config) {
-				c.Kafka.Consumer.Brokers = nil
+				c.Kafka.Producer.Brokers = nil
 			},
-			expectPart: "consumer.brokers",
+			expectPart: "producer.brokers",
 		},
 		{
-			name: "no pipelines",
+			name: "invalid session timeout",
 			mutate: func(c *Config) {
-				c.Transforms.Pipelines = nil
+				c.Kafka.Consumer.SessionTimeout = "invalid"
 			},
-			expectPart: "transforms.pipelines",
+			expectPart: "session_timeout",
+		},
+		{
+			name: "missing pipeline output topic",
+			mutate: func(c *Config) {
+				c.Transforms.Pipelines[0].OutputTopic = ""
+			},
+			expectPart: "output_topic",
 		},
 	}
 
@@ -131,7 +139,7 @@ func baseConfig() Config {
 					Transforms: []TransformDescriptor{
 						{
 							Type:   "field.rename",
-							Config: map[string]interface{}{"mappings": map[string]interface{}{"foo": "bar"}},
+							Config: json.RawMessage(`{"mappings": {"foo": "bar"}}`),
 						},
 					},
 				},

@@ -17,6 +17,8 @@ kafka:
     max_poll_interval: 5m
     auto_offset_reset: earliest
     enable_auto_commit: false
+    fetch_max_records: 1024
+    poll_interval_ms: 10
   producer:
     brokers:
       - localhost:9092
@@ -105,7 +107,9 @@ enrichment:
     max_idle_conns: 100
     max_conns_per_host: 10
   postgres:
-    url: "postgres://user:pass@localhost:5432/db"
+    # NOTE: In production, inject the actual database URL via environment variables
+    # or a secret management system. Do not commit real credentials.
+    url: "${POSTGRES_URL}"
     max_open_conns: 10
     max_idle_conns: 5
     conn_max_lifetime: 1h
