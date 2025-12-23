@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -44,7 +45,9 @@ type Consumer struct {
 	rebalanceCb    func(assigned []PartitionAssignment, revoked []PartitionAssignment)
 	wg             sync.WaitGroup
 	done           chan struct{}
+	doneOnce       sync.Once
 	closeOnce      sync.Once
+	started        uint32
 	handlerTimeout time.Duration
 }
 
@@ -77,7 +80,6 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 		// We'll manage commits manually (commit-on-success).
 		kgo.DisableAutoCommit(),
 		kgo.OnPartitionsAssigned(func(ctx context.Context, cl *kgo.Client, as map[string][]int32) {
-			// convert assignment map to slice
 			var assigned []PartitionAssignment
 			for t, ps := range as {
 				for _, p := range ps {
@@ -98,9 +100,6 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 			if c != nil {
 				c.notifyRebalance(nil, revoked)
 			}
-			// OnPartitionsRevoked: users may want to commit in their handler.
-			// We don't perform commits here; the registered handler should do so
-			// if desired (e.g., via an OffsetManager).
 		}),
 		kgo.OnPartitionsLost(func(ctx context.Context, cl *kgo.Client, lost map[string][]int32) {
 			var revoked []PartitionAssignment
@@ -131,9 +130,8 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 	return c, nil
 }
 
-// Start currently registers the handler and returns immediately. The
-// implementation is a placeholder — real consumption loop will use
-// franz-go fetch APIs and the offset manager.
+// Start registers the handler and starts the fetch loop. Multiple Start
+// calls are guarded against and will return an error if already started.
 func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
 	if c == nil {
 		return fmt.Errorf("consumer is nil")
@@ -142,11 +140,16 @@ func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
 		return fmt.Errorf("handler is required")
 	}
 
+	// Prevent multiple starts
+	if !atomic.CompareAndSwapUint32(&c.started, 0, 1) {
+		return fmt.Errorf("consumer already started")
+	}
+
 	// Start fetch loop
 	c.wg.Add(1)
 	go func() {
 		defer func() {
-			close(c.done)
+			c.doneOnce.Do(func() { close(c.done) })
 			c.wg.Done()
 		}()
 
@@ -177,7 +180,6 @@ func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
 						// Wrap handler invocation with a timeout derived from consumer context
 						hctx, hcancel := context.WithTimeout(c.ctx, c.handlerTimeout)
 						// ensure we don't leak timers — call cancel after handler returns
-						// Note: avoid defer in tight loop
 						if err := handler(hctx, r.Value); err != nil {
 							hcancel()
 							c.logger.Error("handler error; record not committed", zap.Error(err), zap.String("topic", r.Topic), zap.Int32("partition", r.Partition), zap.Int64("offset", r.Offset))
@@ -234,22 +236,28 @@ func (c *Consumer) notifyRebalance(assigned []PartitionAssignment, revoked []Par
 
 // Stop stops the consumer and closes resources.
 func (c *Consumer) Stop(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+
+	// Cancel fetch loop first
 	c.cancel()
-	// Close client exactly once
+
+	// Wait for fetch loop to exit or context cancellation
+	if c.done != nil {
+		select {
+		case <-c.done:
+			// continue to close client
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	// Close client exactly once after fetch loop finished
 	c.closeOnce.Do(func() {
 		if c.client != nil {
 			c.client.Close()
 		}
 	})
-
-	// Wait for fetch loop to exit or context cancellation
-	if c.done == nil {
-		return nil
-	}
-	select {
-	case <-c.done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return nil
 }
