@@ -74,7 +74,7 @@ func parseDurationField(raw, name string) error {
 
 func validLogLevel(level string) bool {
 	switch strings.ToLower(strings.TrimSpace(level)) {
-	case "debug", "info", "warn", "error":
+	case "debug", "info", "warn", "error", "dpanic", "panic", "fatal":
 		return true
 	default:
 		return false

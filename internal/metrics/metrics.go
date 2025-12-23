@@ -73,6 +73,8 @@ func pipelineHistogramOpts(namespace, subsystem string, buckets map[string][]flo
 	}
 	if custom := customBuckets(buckets, "latency"); len(custom) > 0 {
 		opts.Buckets = custom
+	} else {
+		opts.Buckets = prometheus.ExponentialBuckets(0.001, 2, 10)
 	}
 	return opts
 }

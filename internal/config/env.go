@@ -62,6 +62,9 @@ var envOverrides = []struct {
 		return nil
 	}},
 	{key: envPrefix + "_KAFKA_CONSUMER_BROKERS", apply: func(cfg *Config, raw string) error {
+		if raw == "" {
+			return nil
+		}
 		cfg.Kafka.Consumer.Brokers = parseCSV(raw)
 		return nil
 	}},
@@ -73,10 +76,16 @@ var envOverrides = []struct {
 		return nil
 	}},
 	{key: envPrefix + "_KAFKA_CONSUMER_TOPICS", apply: func(cfg *Config, raw string) error {
+		if raw == "" {
+			return nil
+		}
 		cfg.Kafka.Consumer.Topics = parseCSV(raw)
 		return nil
 	}},
 	{key: envPrefix + "_KAFKA_PRODUCER_BROKERS", apply: func(cfg *Config, raw string) error {
+		if raw == "" {
+			return nil
+		}
 		cfg.Kafka.Producer.Brokers = parseCSV(raw)
 		return nil
 	}},

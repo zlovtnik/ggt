@@ -117,6 +117,10 @@ func (e Event) SetField(path string, value interface{}) Event {
 }
 
 func (e Event) RemoveField(path string) Event {
+	if path == "" {
+		return e
+	}
+
 	result := e.Clone()
 	if result.Payload == nil {
 		return result

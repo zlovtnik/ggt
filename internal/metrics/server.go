@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
@@ -30,8 +31,11 @@ func NewServer(port int, logger *zap.Logger) (*Server, error) {
 	mux.Handle("/metrics", promhttp.Handler())
 	return &Server{
 		httpServer: &http.Server{
-			Addr:    fmt.Sprintf(":%d", port),
-			Handler: mux,
+			Addr:         fmt.Sprintf(":%d", port),
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 10 * time.Second,
+			IdleTimeout:  120 * time.Second,
+			Handler:      mux,
 		},
 		logger: logger.With(zap.String("server", "metrics")),
 		port:   port,
