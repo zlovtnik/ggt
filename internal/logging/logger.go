@@ -1,6 +1,8 @@
 package logging
 
 import (
+	"strings"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -11,6 +13,7 @@ func NewLogger(level string) (*zap.Logger, error) {
 	config.EncoderConfig.TimeKey = "timestamp"
 	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 
+	level = strings.ToLower(strings.TrimSpace(level))
 	switch level {
 	case "debug":
 		config.Level = zap.NewAtomicLevelAt(zap.DebugLevel)

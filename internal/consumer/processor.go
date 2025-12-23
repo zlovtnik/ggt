@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/zlovtnik/ggt/pkg/event"
 	"go.uber.org/zap"
@@ -16,6 +17,7 @@ type Processor struct {
 	wg        sync.WaitGroup
 	handler   func(context.Context, event.Event) error
 	logger    *zap.Logger
+	shutdown  uint32
 }
 
 // NewProcessor creates a processor with a given concurrency limit.
@@ -38,6 +40,9 @@ func (p *Processor) Enqueue(ctx context.Context, evt event.Event) error {
 	if p == nil {
 		return fmt.Errorf("processor is nil")
 	}
+	if atomic.LoadUint32(&p.shutdown) == 1 {
+		return fmt.Errorf("processor is shutting down")
+	}
 	select {
 	case p.workerSem <- struct{}{}:
 		// acquired slot
@@ -57,6 +62,12 @@ func (p *Processor) Enqueue(ctx context.Context, evt event.Event) error {
 
 // Stop waits for in-flight work to complete or until ctx is done.
 func (p *Processor) Stop(ctx context.Context) error {
+	if p == nil {
+		return nil
+	}
+	// prevent new enqueues
+	atomic.StoreUint32(&p.shutdown, 1)
+
 	done := make(chan struct{})
 	go func() {
 		p.wg.Wait()

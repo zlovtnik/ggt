@@ -81,7 +81,9 @@ func main() {
 
 	healthServer := health.NewServer(cfg.Service.HealthPort, logger)
 	if healthServer != nil {
-		healthServer.AddCheck("pipeline worker", worker.HealthCheck)
+		if err := healthServer.AddCheck("pipeline worker", worker.HealthCheck); err != nil {
+			logger.Warn("failed to register health check", zap.Error(err))
+		}
 		healthServer.Start(cancel)
 		coordinator.Register("health server", healthServer)
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,13 +51,24 @@ func NewServer(port int, logger *zap.Logger) *Server {
 }
 
 // AddCheck registers a named check that runs during /healthz requests.
-func (s *Server) AddCheck(name string, check CheckFunc) {
+func (s *Server) AddCheck(name string, check CheckFunc) error {
 	if s == nil || check == nil {
-		return
+		return fmt.Errorf("server or check is nil")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("check name is required")
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	// prevent duplicate names
+	for _, nc := range s.checks {
+		if nc.name == name {
+			return fmt.Errorf("check with name %q already registered", name)
+		}
+	}
 	s.checks = append(s.checks, namedCheck{name: name, check: check})
-	s.mu.Unlock()
+	return nil
 }
 
 // Start begins serving health endpoints in the background.

@@ -51,8 +51,10 @@ func (s *Server) Start(cancel context.CancelFunc) (<-chan struct{}, <-chan error
 	ready := make(chan struct{})
 	errCh := make(chan error, 1)
 	if s == nil || s.httpServer == nil {
-		close(ready)
-		close(errCh)
+		go func() {
+			errCh <- fmt.Errorf("metrics server not configured")
+			close(errCh)
+		}()
 		return ready, errCh
 	}
 

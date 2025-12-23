@@ -1,7 +1,6 @@
 package consumer
 
 import (
-	"context"
 	"fmt"
 	"sync"
 
@@ -28,7 +27,7 @@ func NewOffsetManager(logger *zap.Logger) *OffsetManager {
 // Commit records an offset for a given topic-partition key. This is a
 // local in-memory commit; persistence/interaction with the broker will
 // be added when wiring with the consumer.
-func (o *OffsetManager) Commit(ctx context.Context, key string, offset int64) error {
+func (o *OffsetManager) Commit(key string, offset int64) error {
 	if o == nil {
 		return fmt.Errorf("offset manager is nil")
 	}
@@ -41,6 +40,9 @@ func (o *OffsetManager) Commit(ctx context.Context, key string, offset int64) er
 
 // Get returns the last committed offset for a key or false when unknown.
 func (o *OffsetManager) Get(key string) (int64, bool) {
+	if o == nil {
+		return 0, false
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	v, ok := o.commits[key]

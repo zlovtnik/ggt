@@ -16,6 +16,9 @@ type ConsumerConfig struct {
 	Brokers []string
 	GroupID string
 	Topics  []string
+	// HandlerTimeout, if set, limits how long a handler invocation may run.
+	// If zero, a sensible default (30s) is used.
+	HandlerTimeout time.Duration
 }
 
 // PartitionAssignment is a lightweight representation of a topic/partition
@@ -37,8 +40,12 @@ type Consumer struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	// optional rebalance callback registered by callers
-	rebalanceMu sync.Mutex
-	rebalanceCb func(assigned []PartitionAssignment, revoked []PartitionAssignment)
+	rebalanceMu    sync.Mutex
+	rebalanceCb    func(assigned []PartitionAssignment, revoked []PartitionAssignment)
+	wg             sync.WaitGroup
+	done           chan struct{}
+	closeOnce      sync.Once
+	handlerTimeout time.Duration
 }
 
 // NewConsumer constructs a consumer wrapper backed by franz-go. It
@@ -115,6 +122,12 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 	}
 
 	c.client = client
+	c.done = make(chan struct{})
+	if cfg.HandlerTimeout > 0 {
+		c.handlerTimeout = cfg.HandlerTimeout
+	} else {
+		c.handlerTimeout = 30 * time.Second
+	}
 	return c, nil
 }
 
@@ -130,14 +143,16 @@ func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
 	}
 
 	// Start fetch loop
+	c.wg.Add(1)
 	go func() {
 		defer func() {
-			// ensure client closed when context cancels
-			c.client.Close()
+			close(c.done)
+			c.wg.Done()
 		}()
 
 		c.logger.Info("consumer fetch loop started")
 
+	fetchLoop:
 		for {
 			select {
 			case <-c.ctx.Done():
@@ -153,15 +168,24 @@ func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
 				c.logger.Error("fetch error", zap.String("topic", topic), zap.Int32("partition", partition), zap.Error(err))
 			})
 
+			var abortErr error
+
 			// Process each topic/partition's records
 			fetches.EachTopic(func(ft kgo.FetchTopic) {
 				ft.EachPartition(func(fp kgo.FetchPartition) {
 					fp.EachRecord(func(r *kgo.Record) {
-						// Call handler synchronously; handler is expected to provide its own queuing/backpressure.
-						if err := handler(c.ctx, r.Value); err != nil {
+						// Wrap handler invocation with a timeout derived from consumer context
+						hctx, hcancel := context.WithTimeout(c.ctx, c.handlerTimeout)
+						// ensure we don't leak timers — call cancel after handler returns
+						// Note: avoid defer in tight loop
+						if err := handler(hctx, r.Value); err != nil {
+							hcancel()
 							c.logger.Error("handler error; record not committed", zap.Error(err), zap.String("topic", r.Topic), zap.Int32("partition", r.Partition), zap.Int64("offset", r.Offset))
+							// record the error and abort after this fetch iteration
+							abortErr = err
 							return
 						}
+						hcancel()
 
 						// Commit this record on success (commit-on-success semantics)
 						if err := c.client.CommitRecords(c.ctx, r); err != nil {
@@ -170,6 +194,12 @@ func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
 					})
 				})
 			})
+
+			if abortErr != nil {
+				// abort the fetch loop so callers can handle the error (via consumer stop or higher-level retry)
+				c.logger.Warn("aborting fetch iteration due to handler error")
+				break fetchLoop
+			}
 
 			// small sleep to avoid hot-loop in edge cases
 			time.Sleep(10 * time.Millisecond)
@@ -204,11 +234,22 @@ func (c *Consumer) notifyRebalance(assigned []PartitionAssignment, revoked []Par
 
 // Stop stops the consumer and closes resources.
 func (c *Consumer) Stop(ctx context.Context) error {
-	if c == nil {
+	c.cancel()
+	// Close client exactly once
+	c.closeOnce.Do(func() {
+		if c.client != nil {
+			c.client.Close()
+		}
+	})
+
+	// Wait for fetch loop to exit or context cancellation
+	if c.done == nil {
 		return nil
 	}
-	c.cancel()
-	// Allow franz-go client to close gracefully.
-	c.client.Close()
-	return nil
+	select {
+	case <-c.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
