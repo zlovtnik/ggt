@@ -1,0 +1,118 @@
+# The service configuration can also be read from a JSON file pointed to by TRANSFORM_CONFIG_PATH or adjusted via environment variables such as TRANSFORM_SERVICE_LOG_LEVEL.
+service:
+  name: transform-service
+  log_level: info
+  metrics_port: 9090
+  health_port: 8080
+  shutdown_timeout: 30s
+
+kafka:
+  consumer:
+    brokers:
+      - localhost:9092
+    group_id: transform-service
+    topics:
+      - raw.events
+    session_timeout: 45s
+    max_poll_interval: 5m
+    auto_offset_reset: earliest
+    enable_auto_commit: false
+  producer:
+    brokers:
+      - localhost:9092
+    compression: snappy
+    idempotent: true
+    max_in_flight: 5
+    batch_size: 16384
+    linger_ms: 10
+    acks: all
+
+transforms:
+  pipelines:
+    - name: user_enrichment
+      input_topics:
+        - raw.users
+      output_topic: enriched.users
+      dlq_topic: dlq.users
+      transforms:
+        - type: field.rename
+          config:
+            mappings:
+              user_id: id
+              user_name: name
+        - type: enrich.lookup
+          config:
+            source: redis
+            key_field: id
+            cache_ttl: 5m
+            redis:
+              addr: localhost:6379
+              db: 0
+            target_field: user_metadata
+        - type: data.mask
+          config:
+            fields:
+              - email
+              - phone
+            mask_type: partial
+            preserve_length: true
+        - type: validate.schema
+          config:
+            schema_file: schemas/user.json
+            on_error: dlq
+    - name: order_processing
+      input_topics:
+        - raw.orders
+      output_topic: enriched.orders
+      dlq_topic: dlq.orders
+      transforms:
+        - type: field.flatten
+          config:
+            field: shipping_address
+            prefix: shipping_
+        - type: data.convert
+          config:
+            fields:
+              - name: total_amount
+                from: string
+                to: float64
+              - name: order_date
+                from: string
+                to: timestamp
+                format: "2006-01-02T15:04:05Z"
+        - type: enrich.http
+          config:
+            url: "http://inventory-service/api/v1/products/{{.product_id}}"
+            method: GET
+            timeout: 500ms
+            cache_ttl: 10m
+            target_field: product_info
+        - type: filter.condition
+          config:
+            condition: "payload.status == 'completed'"
+            on_false: drop
+
+enrichment:
+  redis:
+    default:
+      addr: localhost:6379
+      password: ""
+      db: 0
+      max_retries: 3
+      pool_size: 10
+  http:
+    default_timeout: 1s
+    max_idle_conns: 100
+    max_conns_per_host: 10
+  postgres:
+    url: "postgres://user:pass@localhost:5432/db"
+    max_open_conns: 10
+    max_idle_conns: 5
+    conn_max_lifetime: 1h
+
+metrics:
+  namespace: transform_service
+  subsystem: pipeline
+  buckets:
+    latency: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+    size: [100, 500, 1000, 5000, 10000, 50000, 100000]
