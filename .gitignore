@@ -1,0 +1,55 @@
+# Binaries
+/ggt
+/bin/
+/build/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build/test artifacts
+*.test
+*.out
+*.prof
+coverage.out
+
+# Go modules/cache
+/vendor/
+/go/pkg/mod/
+
+# IDEs, editors, OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Runtime config (keep examples in repo)
+configs/config.yaml
+
+# Logs
+*.log
+
+# Generated files
+*.pb.go
+*.gen.go
+*.tmp
+
+# Tooling caches
+.golangci.yml
+.golangci-cache/
+.cache/
+
+# Docker
+docker-compose.override.yml
+
+# Misc
+*.patch
+tmp/
