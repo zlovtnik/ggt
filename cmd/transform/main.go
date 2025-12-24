@@ -282,13 +282,37 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 
 		switch result := result.(type) {
 		case event.Event:
+			// Check if event should go to DLQ
+			if dlqReason, hasDLQ := result.Headers["_dlq_reason"]; hasDLQ && dlqReason != "" {
+				dlqTopic := info.cfg.DLQTopic
+				if dlqTopic != "" {
+					dlqValue, err := json.Marshal(result.Payload)
+					if err != nil {
+						logger.Error("failed to marshal DLQ payload", zap.Error(err), zap.Any("payload", result.Payload))
+						return err
+					}
+					if err := w.prod.Send(hctx, dlqTopic, r.Key, dlqValue); err != nil {
+						logger.Error("failed to send to DLQ", zap.Error(err))
+						return err
+					}
+					w.metrics.MessagesSentToDLQ.Inc()
+					return nil
+				}
+			}
 			// Single event output
 			outputValue, err := json.Marshal(result.Payload)
 			if err != nil {
 				logger.Error("failed to marshal output payload", zap.Error(err), zap.Any("payload", result.Payload))
 				return err
 			}
-			if err := w.prod.Send(hctx, outputTopic, r.Key, outputValue); err != nil {
+			// Check for routing header
+			sendTopic := outputTopic
+			if routeTarget, ok := result.Headers["_route_target"]; ok && routeTarget != "" {
+				sendTopic = routeTarget
+				// Increment routing metrics
+				w.metrics.RoutingMetrics.WithLabelValues("filter.route", sendTopic).Inc()
+			}
+			if err := w.prod.Send(hctx, sendTopic, r.Key, outputValue); err != nil {
 				logger.Error("failed to send to output", zap.Error(err))
 				return err
 			}
@@ -297,6 +321,32 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 			var failedIndices []int
 			dlqTopic := info.cfg.DLQTopic
 			for i, evt := range result {
+				// Check if event should go to DLQ
+				if dlqReason, hasDLQ := evt.Headers["_dlq_reason"]; hasDLQ && dlqReason != "" {
+					if dlqTopic != "" {
+						dlqValue, err := json.Marshal(evt.Payload)
+						if err != nil {
+							logger.Error("failed to marshal DLQ payload", zap.Error(err), zap.Int("index", i), zap.Any("payload", evt.Payload))
+							failedIndices = append(failedIndices, i)
+							continue
+						}
+						key := r.Key
+						if len(result) > 1 {
+							if key == nil {
+								key = strconv.AppendInt([]byte("multi-"), int64(i), 10)
+							} else {
+								key = strconv.AppendInt(append(key, '-'), int64(i), 10)
+							}
+						}
+						if err := w.prod.Send(hctx, dlqTopic, key, dlqValue); err != nil {
+							logger.Error("failed to send to DLQ", zap.Error(err), zap.Int("index", i))
+							failedIndices = append(failedIndices, i)
+							continue
+						}
+						w.metrics.MessagesSentToDLQ.Inc()
+						continue
+					}
+				}
 				outputValue, err := json.Marshal(evt.Payload)
 				if err != nil {
 					logger.Error("failed to marshal output payload", zap.Error(err), zap.Int("index", i), zap.Any("payload", evt.Payload))
@@ -313,7 +363,14 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 						key = strconv.AppendInt(append(key, '-'), int64(i), 10)
 					}
 				}
-				if err := w.prod.Send(hctx, outputTopic, key, outputValue); err != nil {
+				// Check for routing header
+				sendTopic := outputTopic
+				if routeTarget, ok := evt.Headers["_route_target"]; ok && routeTarget != "" {
+					sendTopic = routeTarget
+					// Increment routing metrics
+					w.metrics.RoutingMetrics.WithLabelValues("filter.route", sendTopic).Inc()
+				}
+				if err := w.prod.Send(hctx, sendTopic, key, outputValue); err != nil {
 					logger.Error("failed to send to output", zap.Error(err), zap.Int("index", i))
 					// Send to DLQ if configured
 					if dlqTopic != "" {
