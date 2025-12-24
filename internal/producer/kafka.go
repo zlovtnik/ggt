@@ -3,7 +3,6 @@ package producer
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.uber.org/zap"
@@ -65,19 +64,12 @@ func (p *Producer) Send(ctx context.Context, topic string, key, value []byte) er
 	if p == nil {
 		return fmt.Errorf("producer is nil")
 	}
-	// TODO: implement production using p.client.ProduceSync or batching.
-	_ = topic
-	_ = key
-	_ = value
-	// simulate small delay for pipeline compatibility
-	timer := time.NewTimer(1 * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	record := &kgo.Record{
+		Topic: topic,
+		Key:   key,
+		Value: value,
 	}
+	return p.client.ProduceSync(ctx, record).FirstErr()
 }
 
 // Close shuts down the producer client.

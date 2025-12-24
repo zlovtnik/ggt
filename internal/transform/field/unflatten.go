@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/zlovtnik/ggt/internal/transform"
@@ -39,7 +40,17 @@ func (u *unflattenTransform) Execute(_ctx context.Context, e interface{}) (inter
 
 func unflattenMap(m map[string]interface{}) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
-	for k, v := range m {
+
+	// Collect all keys and sort them for deterministic iteration
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Iterate over sorted keys
+	for _, k := range keys {
+		v := m[k]
 		parts := strings.Split(k, ".")
 		if err := setNested(result, parts, v); err != nil {
 			return nil, fmt.Errorf("unflatten conflict at key %q: %w", k, err)

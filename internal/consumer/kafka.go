@@ -129,7 +129,7 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 
 // Start registers the handler and starts the fetch loop. Multiple Start
 // calls are guarded against and will return an error if already started.
-func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
+func (c *Consumer) Start(handler func(context.Context, *kgo.Record) error) error {
 	if c == nil {
 		return fmt.Errorf("consumer is nil")
 	}
@@ -182,7 +182,7 @@ func (c *Consumer) Start(handler func(context.Context, []byte) error) error {
 						hctx, hcancel := context.WithTimeout(c.ctx, c.handlerTimeout)
 						defer hcancel()
 						// ensure we don't leak timers — call cancel after handler returns
-						if err := handler(hctx, r.Value); err != nil {
+						if err := handler(hctx, r); err != nil {
 							c.logger.Error("handler error; record not committed", zap.Error(err), zap.String("topic", r.Topic), zap.Int32("partition", r.Partition), zap.Int64("offset", r.Offset))
 							// record the error and abort after this fetch iteration
 							abortErr = err

@@ -12,7 +12,7 @@ import (
 var ErrDrop = errors.New("transform: drop event")
 
 // Transform is the interface implemented by all transforms.
-// Implementations should be pure functions operating on an event.Event.
+// Implementations should be pure functions operating on an event payload.
 type Transform interface {
 	// Name returns the transform name used for logging/metrics.
 	Name() string

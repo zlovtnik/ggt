@@ -17,6 +17,7 @@ test:
 clean:
 	rm -rf bin/
 	rm -f coverage.out
+	rm -f coverage.html
 
 # Format code
 fmt:

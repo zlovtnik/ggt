@@ -6,12 +6,15 @@ import (
 )
 
 type Metrics struct {
-	MessagesProcessed prometheus.Counter
-	MessagesDropped   prometheus.Counter
-	MessagesSentToDLQ prometheus.Counter
-	TransformDuration *prometheus.HistogramVec
-	TransformErrors   *prometheus.CounterVec
-	PipelineDuration  prometheus.Histogram
+	MessagesProcessed     prometheus.Counter
+	MessagesDropped       prometheus.Counter
+	MessagesSentToDLQ     prometheus.Counter
+	TransformDuration     *prometheus.HistogramVec
+	TransformErrors       *prometheus.CounterVec
+	PipelineDuration      prometheus.Histogram
+	RoutingMetrics        *prometheus.CounterVec
+	ValidationMetrics     *prometheus.CounterVec
+	FilteredMessagesTotal *prometheus.CounterVec
 }
 
 func New() *Metrics {
@@ -46,6 +49,24 @@ func NewWithNamespace(namespace, subsystem string, buckets map[string][]float64)
 			Help:      "Errors surfaced by transforms",
 		}, []string{"transform", "pipeline"}),
 		PipelineDuration: promauto.NewHistogram(pipelineHistogramOpts(namespace, subsystem, buckets)),
+		RoutingMetrics: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "filter_route_total",
+			Help:      "Messages routed by topic",
+		}, []string{"route", "target_topic"}),
+		ValidationMetrics: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "validate_total",
+			Help:      "Validation transform results",
+		}, []string{"validator", "result"}),
+		FilteredMessagesTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "filter_total",
+			Help:      "Messages filtered by condition",
+		}, []string{"filter", "action"}),
 	}
 }
 

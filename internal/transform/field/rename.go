@@ -44,13 +44,16 @@ func (r *renameTransform) Execute(_ctx context.Context, e interface{}) (interfac
 		var existingSources []string
 		for _, source := range sources {
 			if _, exists := out.GetField(source); exists {
-				existingSources = append(existingSources, source)
+				// Skip self-renames (source == target) as they are no-ops
+				if source != target {
+					existingSources = append(existingSources, source)
+				}
 			}
 		}
 		if len(existingSources) > 1 {
 			return nil, fmt.Errorf("field.rename: multiple source fields %v map to the same target %q, would cause overwrite", existingSources, target)
 		}
-		// Also check if target already exists and any source exists
+		// Also check if target already exists and any non-self-renaming source exists
 		if _, targetExists := out.GetField(target); targetExists && len(existingSources) > 0 {
 			return nil, fmt.Errorf("field.rename: target field %q already exists and source field(s) %v would overwrite it", target, existingSources)
 		}
