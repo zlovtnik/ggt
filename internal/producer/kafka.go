@@ -15,7 +15,7 @@ type ProducerConfig struct {
 }
 
 // parseAcks converts string acks value to kgo.Acks
-func parseAcks(acks string) kgo.Acks {
+func parseAcks(acks string, logger *zap.Logger) kgo.Acks {
 	switch acks {
 	case "0":
 		return kgo.NoAck()
@@ -25,6 +25,9 @@ func parseAcks(acks string) kgo.Acks {
 		return kgo.AllISRAcks()
 	default:
 		// Default to all acks for safety
+		if logger != nil {
+			logger.Warn("invalid acks value, defaulting to 'all'", zap.String("acks", acks))
+		}
 		return kgo.AllISRAcks()
 	}
 }
@@ -49,7 +52,7 @@ func NewProducer(cfg ProducerConfig, logger *zap.Logger) (*Producer, error) {
 
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(cfg.Brokers...),
-		kgo.RequiredAcks(parseAcks(cfg.Acks)),
+		kgo.RequiredAcks(parseAcks(cfg.Acks, logger)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create franz-go client: %w", err)

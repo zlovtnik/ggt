@@ -87,7 +87,11 @@ func main() {
 		coordinator.Register("metrics server", metricsServer)
 	}
 
-	worker := startPipelineWorker(ctx, logger, metricsCollector, &cfg)
+	worker, err := startPipelineWorker(ctx, logger, metricsCollector, &cfg)
+	if err != nil {
+		logger.Error("failed to start pipeline worker", zap.Error(err))
+		os.Exit(1)
+	}
 	coordinator.Register("pipeline worker", shutdown.ShutdownFunc(worker.Stop))
 
 	healthServer, err := health.NewServer(cfg.Service.HealthPort, logger)
@@ -143,7 +147,7 @@ type pipelineWorker struct {
 	prod    *producer.Producer
 }
 
-func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsCollector *metrics.Metrics, cfg *config.Config) *pipelineWorker {
+func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsCollector *metrics.Metrics, cfg *config.Config) (*pipelineWorker, error) {
 	ctx, cancel := context.WithCancel(parent)
 	w := &pipelineWorker{cancel: cancel, done: make(chan struct{}), metrics: metricsCollector}
 
@@ -165,10 +169,13 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 		pipe, err := transform.NewPipeline(p.Name, p.Transforms)
 		if err != nil {
 			logger.Error("failed to create pipeline", zap.String("name", p.Name), zap.Error(err))
-			return nil
+			return nil, err
 		}
 		info := &pipelineInfo{pipe: pipe, cfg: &p}
 		for _, t := range p.InputTopics {
+			if existing, ok := pipelines[t]; ok {
+				return nil, fmt.Errorf("duplicate input topic %q used by pipelines %q and %q", t, existing.cfg.Name, p.Name)
+			}
 			pipelines[t] = info
 		}
 	}
@@ -185,9 +192,14 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 	cons, err := consumer.NewConsumer(consumerCfg, logger)
 	if err != nil {
 		logger.Error("failed to create consumer", zap.Error(err))
-		return nil
+		return nil, err
 	}
 	w.cons = cons
+	defer func() {
+		if w.cons != nil {
+			w.cons.Stop(context.Background())
+		}
+	}()
 
 	// Create producer
 	producerCfg := producer.ProducerConfig{
@@ -197,9 +209,14 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 	prod, err := producer.NewProducer(producerCfg, logger)
 	if err != nil {
 		logger.Error("failed to create producer", zap.Error(err))
-		return nil
+		return nil, err
 	}
 	w.prod = prod
+	defer func() {
+		if w.prod != nil {
+			w.prod.Close()
+		}
+	}()
 
 	handler := func(hctx context.Context, r *kgo.Record) error {
 		topic := r.Topic
@@ -255,8 +272,12 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 
 	if err := cons.Start(handler); err != nil {
 		logger.Error("failed to start consumer", zap.Error(err))
-		return nil
+		return nil, err
 	}
+
+	// Cancel deferred cleanup since startup succeeded
+	w.cons = nil
+	w.prod = nil
 
 	go func() {
 		logger.Info("pipeline worker started")
@@ -270,7 +291,7 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 			w.prod.Close()
 		}
 	}()
-	return w
+	return w, nil
 }
 
 func (w *pipelineWorker) Stop(ctx context.Context) error {

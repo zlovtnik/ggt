@@ -96,6 +96,10 @@ func TestCaseTransform_Execute(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &caseTransform{}
 			err := c.Configure([]byte(tt.config))
+			if tt.name == "unsupported case" {
+				assert.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
 
 			ev := tt.input

@@ -305,7 +305,8 @@ func TestRouteTransform(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				require.NoError(t, err)
-				ev := result.(event.Event)
+				ev, ok := result.(event.Event)
+				require.True(t, ok, "result should be event.Event")
 				assert.Equal(t, tt.wantTarget, ev.Headers["_route_target"])
 			}
 		})

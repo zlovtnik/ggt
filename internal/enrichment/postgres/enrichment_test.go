@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	transformPkg "github.com/zlovtnik/ggt/internal/transform"
 	"github.com/zlovtnik/ggt/pkg/event"
 )
 
@@ -134,7 +135,8 @@ func TestPostgresEnrichment_Execute_DropOnError(t *testing.T) {
 	}
 
 	result, err := transform.Execute(context.Background(), ev)
-	assert.NoError(t, err)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, transformPkg.ErrDrop)
 	assert.Nil(t, result)
 }
 

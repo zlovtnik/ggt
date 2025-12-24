@@ -76,10 +76,10 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 		return nil, fmt.Errorf("enrich.http: payload is not an event")
 	}
 
-	url, err := interpolateURL(e.config.URL, ev)
+	url, err := interpolateTemplate(e.config.URL, ev)
 	if err != nil {
 		if e.config.DropOnError {
-			return nil, nil
+			return nil, transform.ErrDrop
 		}
 		return nil, fmt.Errorf("enrich.http: %w", err)
 	}
@@ -94,10 +94,10 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 		var requestBody string
 		if e.config.Body != "" {
 			var err error
-			requestBody, err = interpolateURL(e.config.Body, ev)
+			requestBody, err = interpolateTemplate(e.config.Body, ev)
 			if err != nil {
 				if e.config.DropOnError {
-					return nil, nil
+					return nil, transform.ErrDrop
 				}
 				return nil, fmt.Errorf("enrich.http: body interpolation failed: %w", err)
 			}
@@ -109,7 +109,7 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 
 	if err != nil {
 		if e.config.DropOnError {
-			return nil, nil
+			return nil, transform.ErrDrop
 		}
 		return nil, fmt.Errorf("enrich.http execute: %w", err)
 	}
@@ -117,7 +117,7 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 	var result interface{}
 	if err := json.Unmarshal([]byte(body), &result); err != nil {
 		if e.config.DropOnError {
-			return nil, nil
+			return nil, transform.ErrDrop
 		}
 		return nil, fmt.Errorf("enrich.http: json parse failed: %w", err)
 	}
@@ -125,12 +125,12 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 	return ev.SetField(e.config.TargetField, result), nil
 }
 
-// interpolateURL replaces {{.fieldname}} placeholders with event field values.
+// interpolateTemplate replaces {{.fieldname}} placeholders with event field values.
 // Returns an error if any placeholder field is not found in the event.
-func interpolateURL(urlTemplate string, ev event.Event) (string, error) {
+func interpolateTemplate(template string, ev event.Event) (string, error) {
 	var missingFields []string
 
-	result := tplVarRe.ReplaceAllStringFunc(urlTemplate, func(match string) string {
+	result := tplVarRe.ReplaceAllStringFunc(template, func(match string) string {
 		// Extract field name from {{.fieldname}} pattern
 		fieldName := match[3 : len(match)-2]
 		val, ok := ev.GetField(fieldName)
@@ -142,7 +142,7 @@ func interpolateURL(urlTemplate string, ev event.Event) (string, error) {
 	})
 
 	if len(missingFields) > 0 {
-		return "", fmt.Errorf("url interpolation failed: placeholder fields not found in event: %v", missingFields)
+		return "", fmt.Errorf("template interpolation failed: placeholder fields not found in event: %v", missingFields)
 	}
 
 	return result, nil
@@ -180,6 +180,7 @@ func RegisterHTTPEnrichment(cfg *config.EnrichmentConfig) error {
 		CircuitOpenTime:  30 * time.Second,
 		FailureThreshold: 5,
 		SuccessThreshold: 2,
+		MaxResponseSize:  cfg.HTTP.MaxResponseSize,
 	}
 
 	client := NewClient(httpCfg)

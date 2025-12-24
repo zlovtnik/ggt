@@ -299,7 +299,8 @@ func TestRulesTransform(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				if tt.checkDLQ {
-					ev := result.(event.Event)
+					ev, ok := result.(event.Event)
+					require.True(t, ok, "result should be event.Event")
 					assert.NotEmpty(t, ev.Headers["_dlq_reason"])
 					assert.Equal(t, "validate.rules", ev.Headers["_dlq_transform"])
 				}

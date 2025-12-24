@@ -5,12 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
-	_ "github.com/lib/pq"
-
+	"github.com/lib/pq"
 	"github.com/zlovtnik/ggt/internal/enrichment"
 )
 
@@ -55,7 +53,8 @@ type Client struct {
 	db              *sql.DB
 	cache           *enrichment.LRUCache
 	stmtCache       map[string]*sql.Stmt
-	stmtLRU         *list.List // tracks access order for LRU eviction
+	stmtLRU         *list.List               // tracks access order for LRU eviction
+	stmtElements    map[string]*list.Element // maps query to LRU list element
 	stmtCacheMutex  sync.RWMutex
 	connMaxLifetime time.Duration
 	maxOpenConns    int
@@ -117,6 +116,7 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 		cache:           cache,
 		stmtCache:       make(map[string]*sql.Stmt),
 		stmtLRU:         list.New(),
+		stmtElements:    make(map[string]*list.Element),
 		connMaxLifetime: cfg.ConnMaxLifetime,
 		maxOpenConns:    cfg.MaxOpenConns,
 		maxIdleConns:    cfg.MaxIdleConns,
@@ -132,7 +132,9 @@ func (c *Client) PreparedStmt(ctx context.Context, query string) (*sql.Stmt, err
 	if exists {
 		// Move to front of LRU list
 		c.stmtCacheMutex.Lock()
-		c.moveToFront(query)
+		if elem, elemExists := c.stmtElements[query]; elemExists {
+			c.stmtLRU.MoveToFront(elem)
+		}
 		c.stmtCacheMutex.Unlock()
 		return stmt, nil
 	}
@@ -142,7 +144,9 @@ func (c *Client) PreparedStmt(ctx context.Context, query string) (*sql.Stmt, err
 
 	stmt, exists = c.stmtCache[query]
 	if exists {
-		c.moveToFront(query)
+		if elem, elemExists := c.stmtElements[query]; elemExists {
+			c.stmtLRU.MoveToFront(elem)
+		}
 		return stmt, nil
 	}
 
@@ -157,19 +161,9 @@ func (c *Client) PreparedStmt(ctx context.Context, query string) (*sql.Stmt, err
 	}
 
 	c.stmtCache[query] = stmt
-	c.stmtLRU.PushFront(query)
+	elem := c.stmtLRU.PushFront(query)
+	c.stmtElements[query] = elem
 	return stmt, nil
-}
-
-// moveToFront moves the given query to the front of the LRU list
-func (c *Client) moveToFront(query string) {
-	// Find and remove the element from its current position
-	for e := c.stmtLRU.Front(); e != nil; e = e.Next() {
-		if e.Value.(string) == query {
-			c.stmtLRU.MoveToFront(e)
-			break
-		}
-	}
 }
 
 // evictLRU removes the least recently used statement from cache
@@ -185,6 +179,9 @@ func (c *Client) evictLRU() {
 	// Remove from LRU list
 	c.stmtLRU.Remove(lruElement)
 
+	// Remove from elements map
+	delete(c.stmtElements, lruQuery)
+
 	// Close and remove from cache
 	if stmt, exists := c.stmtCache[lruQuery]; exists {
 		_ = stmt.Close()
@@ -198,26 +195,21 @@ func (c *Client) removeInvalidStmt(query string, err error) {
 		return
 	}
 
-	// Check if error indicates invalid prepared statement
-	errStr := err.Error()
-	if strings.Contains(errStr, "prepared statement") &&
-		(strings.Contains(errStr, "does not exist") ||
-			strings.Contains(errStr, "invalid") ||
-			strings.Contains(errStr, "expired")) {
-
-		c.stmtCacheMutex.Lock()
-		if stmt, exists := c.stmtCache[query]; exists {
-			_ = stmt.Close()
-			delete(c.stmtCache, query)
-			// Remove from LRU list
-			for e := c.stmtLRU.Front(); e != nil; e = e.Next() {
-				if e.Value.(string) == query {
-					c.stmtLRU.Remove(e)
-					break
+	// Check if error indicates invalid prepared statement using pq.Error codes
+	if pqErr, ok := err.(*pq.Error); ok {
+		if pqErr.Code == "26000" || pqErr.Code == "42P14" {
+			c.stmtCacheMutex.Lock()
+			if stmt, exists := c.stmtCache[query]; exists {
+				_ = stmt.Close()
+				delete(c.stmtCache, query)
+				// Remove from LRU list and elements map
+				if elem, elemExists := c.stmtElements[query]; elemExists {
+					c.stmtLRU.Remove(elem)
+					delete(c.stmtElements, query)
 				}
 			}
+			c.stmtCacheMutex.Unlock()
 		}
-		c.stmtCacheMutex.Unlock()
 	}
 }
 
@@ -268,6 +260,7 @@ func (c *Client) Close() error {
 	}
 	c.stmtCache = make(map[string]*sql.Stmt)
 	c.stmtLRU = list.New()
+	c.stmtElements = make(map[string]*list.Element)
 	c.stmtCacheMutex.Unlock()
 
 	c.cache.Clear()

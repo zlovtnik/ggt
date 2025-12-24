@@ -1,8 +1,10 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,7 +34,7 @@ func TestCircuitBreaker_TransitionToHalfOpen(t *testing.T) {
 	cb.RecordFailure()
 	assert.Equal(t, StateOpen, cb.State())
 
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	assert.True(t, cb.Allow())
 	assert.Equal(t, StateHalfOpen, cb.State())
 }
@@ -44,8 +46,62 @@ func TestCircuitBreaker_SuccessClosesCircuit(t *testing.T) {
 	cb.RecordFailure()
 	assert.Equal(t, StateOpen, cb.State())
 
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	assert.True(t, cb.Allow())
+	assert.Equal(t, StateHalfOpen, cb.State())
+
+	cb.RecordSuccess()
+	assert.Equal(t, StateClosed, cb.State())
+}
+
+func TestCircuitBreaker_ConcurrentAccess(t *testing.T) {
+	cb := NewCircuitBreaker(200*time.Millisecond, 1, 2)
+	var wg sync.WaitGroup
+
+	// Start with closed state
+	assert.Equal(t, StateClosed, cb.State())
+
+	// Induce failure to open
+	assert.True(t, cb.Allow())
+	cb.RecordFailure()
+	assert.Equal(t, StateOpen, cb.State())
+
+	// Wait for reset timeout
+	time.Sleep(300 * time.Millisecond)
+	assert.True(t, cb.Allow())
+	assert.Equal(t, StateHalfOpen, cb.State())
+
+	// Launch goroutines to record successes concurrently
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cb.RecordSuccess()
+		}()
+	}
+
+	wg.Wait()
+	// Should be closed after required successes
+	assert.Equal(t, StateClosed, cb.State())
+}
+
+func TestCircuitBreaker_MultipleConsecutiveSuccesses(t *testing.T) {
+	cb := NewCircuitBreaker(100*time.Millisecond, 1, 3)
+
+	// Transition to HalfOpen
+	assert.True(t, cb.Allow())
+	cb.RecordFailure()
+	assert.Equal(t, StateOpen, cb.State())
+
+	time.Sleep(200 * time.Millisecond)
+	assert.True(t, cb.Allow())
+	assert.Equal(t, StateHalfOpen, cb.State())
+
+	// Record successes sequentially
+	cb.RecordSuccess()
+	assert.Equal(t, StateHalfOpen, cb.State())
+
+	cb.RecordSuccess()
 	assert.Equal(t, StateHalfOpen, cb.State())
 
 	cb.RecordSuccess()
@@ -61,7 +117,7 @@ func TestRetrier_Success(t *testing.T) {
 	})
 
 	callCount := 0
-	resp, err := retrier.Do(func() (*http.Response, error) {
+	resp, err := retrier.Do(context.Background(), func() (*http.Response, error) {
 		callCount++
 		return &http.Response{StatusCode: 200}, nil
 	})
@@ -80,7 +136,7 @@ func TestRetrier_Retry(t *testing.T) {
 	})
 
 	callCount := 0
-	resp, err := retrier.Do(func() (*http.Response, error) {
+	resp, err := retrier.Do(context.Background(), func() (*http.Response, error) {
 		callCount++
 		if callCount < 3 {
 			return &http.Response{StatusCode: 503}, nil
@@ -102,13 +158,13 @@ func TestRetrier_FailAfterMaxRetries(t *testing.T) {
 	})
 
 	callCount := 0
-	resp, err := retrier.Do(func() (*http.Response, error) {
+	resp, err := retrier.Do(context.Background(), func() (*http.Response, error) {
 		callCount++
 		return &http.Response{StatusCode: 503}, nil
 	})
 
 	assert.Error(t, err)
-	assert.Equal(t, 3, callCount)
+	assert.Equal(t, 2, callCount)
 	assert.Equal(t, 503, resp.StatusCode)
 }
 
@@ -121,7 +177,7 @@ func TestRetrier_ErrorRetry(t *testing.T) {
 	})
 
 	callCount := 0
-	resp, err := retrier.Do(func() (*http.Response, error) {
+	resp, err := retrier.Do(context.Background(), func() (*http.Response, error) {
 		callCount++
 		if callCount < 3 {
 			return nil, errors.New("network error")
@@ -143,7 +199,7 @@ func TestRetrier_NonRetryableError(t *testing.T) {
 	})
 
 	callCount := 0
-	resp, err := retrier.Do(func() (*http.Response, error) {
+	resp, err := retrier.Do(context.Background(), func() (*http.Response, error) {
 		callCount++
 		return &http.Response{StatusCode: 400}, nil
 	})

@@ -29,9 +29,9 @@ func (f *flattenTransform) Execute(_ctx context.Context, e interface{}) (interfa
 
 	payload := ev.Payload
 	flattened := flattenMap("", payload)
-	newEv := ev
-	newEv.Payload = flattened
-	return newEv, nil
+	cloned := ev.Clone()
+	cloned.Payload = flattened
+	return cloned, nil
 }
 
 func flattenMap(prefix string, m map[string]interface{}) map[string]interface{} {

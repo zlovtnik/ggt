@@ -49,32 +49,36 @@ func TestFormatTransform_Execute(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name     string
-		config   string
-		input    event.Event
-		expected string
-		wantErr  bool
+		name          string
+		config        string
+		input         event.Event
+		expected      string
+		expectedField string
+		wantErr       bool
 	}{
 		{
-			name:     "simple format",
-			config:   `{"field": "greeting", "format": "Hello %s", "args": ["name"]}`,
-			input:    event.Event{Payload: map[string]interface{}{"name": "World"}},
-			expected: "Hello World",
-			wantErr:  false,
+			name:          "simple format",
+			config:        `{"field": "greeting", "format": "Hello %s", "args": ["name"]}`,
+			input:         event.Event{Payload: map[string]interface{}{"name": "World"}},
+			expected:      "Hello World",
+			expectedField: "greeting",
+			wantErr:       false,
 		},
 		{
-			name:     "multiple args",
-			config:   `{"field": "result", "format": "%s is %d years old", "args": ["name", "age"]}`,
-			input:    event.Event{Payload: map[string]interface{}{"name": "Alice", "age": 30}},
-			expected: "Alice is 30 years old",
-			wantErr:  false,
+			name:          "multiple args",
+			config:        `{"field": "result", "format": "%s is %d years old", "args": ["name", "age"]}`,
+			input:         event.Event{Payload: map[string]interface{}{"name": "Alice", "age": 30}},
+			expected:      "Alice is 30 years old",
+			expectedField: "result",
+			wantErr:       false,
 		},
 		{
-			name:     "missing field",
-			config:   `{"field": "result", "format": "Hello %s", "args": ["missing"]}`,
-			input:    event.Event{Payload: map[string]interface{}{"name": "World"}},
-			expected: "",
-			wantErr:  true,
+			name:          "missing field",
+			config:        `{"field": "result", "format": "Hello %s", "args": ["missing"]}`,
+			input:         event.Event{Payload: map[string]interface{}{"name": "World"}},
+			expected:      "",
+			expectedField: "result",
+			wantErr:       true,
 		},
 	}
 
@@ -93,15 +97,9 @@ func TestFormatTransform_Execute(t *testing.T) {
 				assert.NoError(t, err)
 				resultEv, ok := result.(event.Event)
 				require.True(t, ok)
-				val, exists := resultEv.GetField("greeting")
-				if tt.name == "simple format" {
-					assert.True(t, exists)
-					assert.Equal(t, tt.expected, val)
-				} else {
-					val, exists := resultEv.GetField("result")
-					assert.True(t, exists)
-					assert.Equal(t, tt.expected, val)
-				}
+				val, exists := resultEv.GetField(tt.expectedField)
+				assert.True(t, exists)
+				assert.Equal(t, tt.expected, val)
 			}
 		})
 	}

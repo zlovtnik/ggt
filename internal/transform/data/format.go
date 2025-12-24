@@ -55,32 +55,9 @@ func (f *formatTransform) Execute(_ context.Context, e interface{}) (interface{}
 		args[i] = val
 	}
 
-	formatted, err := safeSprintf(f.cfg.Format, args...)
-	if err != nil {
-		return nil, err
-	}
+	formatted := fmt.Sprintf(f.cfg.Format, args...)
 
 	return ev.SetField(f.cfg.Field, formatted), nil
-}
-
-// safeSprintf wraps fmt.Sprintf to recover from panics and return an error instead
-func safeSprintf(format string, args ...interface{}) (string, error) {
-	var result string
-	var panicOccurred bool
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				panicOccurred = true
-			}
-		}()
-		result = fmt.Sprintf(format, args...)
-	}()
-
-	if panicOccurred {
-		return "", fmt.Errorf("format string %q with %d args caused panic (likely mismatched format specifiers)", format, len(args))
-	}
-
-	return result, nil
 }
 
 func init() {

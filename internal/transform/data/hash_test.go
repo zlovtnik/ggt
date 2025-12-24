@@ -135,10 +135,8 @@ func TestHashTransform_Execute(t *testing.T) {
 				resultEvt, ok := result.(event.Event)
 				require.True(t, ok)
 				resultMap := make(map[string]interface{})
-				for _, key := range []string{"text", "data", "password", "input", "output"} {
-					if val, exists := resultEvt.GetField(key); exists {
-						resultMap[key] = val
-					}
+				for key, val := range resultEvt.Payload {
+					resultMap[key] = val
 				}
 				tt.validate(t, resultMap)
 			}

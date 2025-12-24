@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/xeipuuv/gojsonschema"
 	"github.com/zlovtnik/ggt/internal/transform"
@@ -76,10 +77,12 @@ func (s *schemaTransform) Execute(ctx context.Context, e interface{}) (interface
 	}
 
 	if !result.Valid() {
-		var errMessages string
+		var sb strings.Builder
 		for _, err := range result.Errors() {
-			errMessages += err.String() + "; "
+			sb.WriteString(err.String())
+			sb.WriteString("; ")
 		}
+		errMessages := sb.String()
 
 		switch s.cfg.OnError {
 		case "drop":

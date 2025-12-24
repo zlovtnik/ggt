@@ -34,6 +34,8 @@ func TestClient_Get_Set(t *testing.T) {
 	val, err := client.Get(ctx, "test_key")
 	require.NoError(t, err)
 	assert.Equal(t, "test_value", val)
+
+	defer client.Delete(ctx, "test_key")
 }
 
 func TestClient_GetJSON_SetJSON(t *testing.T) {
@@ -64,6 +66,8 @@ func TestClient_GetJSON_SetJSON(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "test", result["name"])
 	assert.Equal(t, float64(123), result["value"])
+
+	defer client.Delete(ctx, "test_json_key")
 }
 
 func TestClient_Caching(t *testing.T) {
@@ -96,6 +100,8 @@ func TestClient_Caching(t *testing.T) {
 	size, ok := stats["size"]
 	require.True(t, ok, "stats should contain 'size' key")
 	assert.Greater(t, size, 0)
+
+	defer client.Delete(ctx, "cache_key")
 }
 
 func TestClient_HGet(t *testing.T) {
@@ -123,6 +129,8 @@ func TestClient_HGet(t *testing.T) {
 	val, err := client.HGet(ctx, "test_hash", "field1")
 	require.NoError(t, err)
 	assert.Equal(t, "value1", val)
+
+	defer client.Delete(ctx, "test_hash")
 }
 
 func TestClient_Exists(t *testing.T) {
@@ -154,6 +162,8 @@ func TestClient_Exists(t *testing.T) {
 	exists, err = client.Exists(ctx, "nonexistent_key")
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), exists)
+
+	defer client.Delete(ctx, "exists_key")
 }
 
 func TestClient_Delete(t *testing.T) {

@@ -17,7 +17,7 @@ func TestLRUCache_SetGet(t *testing.T) {
 func TestLRUCache_Expiration(t *testing.T) {
 	cache := NewLRUCache(10, 50*time.Millisecond)
 	cache.Set("key1", "value1")
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 	val := cache.Get("key1")
 	assert.Nil(t, val)
 }

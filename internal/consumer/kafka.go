@@ -118,7 +118,7 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 
 	c.client = client
 	c.done = make(chan struct{})
-	c.errCh = make(chan error, 1) // buffered to avoid blocking
+	c.errCh = make(chan error, 10) // buffered to track multiple errors
 	if cfg.HandlerTimeout > 0 {
 		c.handlerTimeout = cfg.HandlerTimeout
 	} else {

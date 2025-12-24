@@ -27,7 +27,15 @@ func (c *caseTransform) Configure(raw json.RawMessage) error {
 	if len(raw) == 0 {
 		return fmt.Errorf("config required")
 	}
-	return json.Unmarshal(raw, &c.cfg)
+	if err := json.Unmarshal(raw, &c.cfg); err != nil {
+		return err
+	}
+	switch c.cfg.Case {
+	case "upper", "lower", "title":
+		return nil
+	default:
+		return fmt.Errorf("unsupported case: %s", c.cfg.Case)
+	}
 }
 
 func (c *caseTransform) Execute(_ context.Context, e interface{}) (interface{}, error) {

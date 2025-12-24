@@ -88,6 +88,7 @@ func (s *Server) Start(cancel context.CancelFunc) (<-chan struct{}, <-chan error
 			s.logger.Error("cannot start health server: server or httpServer is nil")
 		}
 		errCh <- fmt.Errorf("health server not configured")
+		close(ready)
 		close(errCh)
 		return ready, errCh
 	}
@@ -95,6 +96,7 @@ func (s *Server) Start(cancel context.CancelFunc) (<-chan struct{}, <-chan error
 	listener, err := net.Listen("tcp", s.httpServer.Addr)
 	if err != nil {
 		errCh <- err
+		close(ready)
 		close(errCh)
 		return ready, errCh
 	}

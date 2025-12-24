@@ -118,7 +118,7 @@ func (cb *CircuitBreaker) State() CircuitBreakerState {
 
 // RetryConfig specifies retry behavior.
 type RetryConfig struct {
-	MaxRetries        int
+	MaxRetries        int // Maximum total number of attempts (including initial attempt)
 	InitialBackoff    time.Duration
 	MaxBackoff        time.Duration
 	BackoffMultiplier float64
@@ -160,12 +160,14 @@ func isRetryable(err error, statusCode int) bool {
 }
 
 // Do executes a request with retries and exponential backoff.
-func (r *Retrier) Do(fn func() (*http.Response, error)) (*http.Response, error) {
+// Do executes the given function with retry logic and exponential backoff.
+// It respects context cancellation during backoff sleeps.
+func (r *Retrier) Do(ctx context.Context, fn func() (*http.Response, error)) (*http.Response, error) {
 	var lastErr error
 	var lastResp *http.Response
 	backoff := r.config.InitialBackoff
 
-	for attempt := 0; attempt <= r.config.MaxRetries; attempt++ {
+	for attempt := 0; attempt < r.config.MaxRetries; attempt++ {
 		resp, err := fn()
 
 		if err == nil && resp != nil && resp.StatusCode < 500 && resp.StatusCode != 408 && resp.StatusCode != 429 {
@@ -197,7 +199,11 @@ func (r *Retrier) Do(fn func() (*http.Response, error)) (*http.Response, error) 
 		}
 
 		if attempt < r.config.MaxRetries {
-			time.Sleep(backoff)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return lastResp, ctx.Err()
+			}
 			backoff = time.Duration(float64(backoff) * r.config.BackoffMultiplier)
 			if backoff > r.config.MaxBackoff {
 				backoff = r.config.MaxBackoff

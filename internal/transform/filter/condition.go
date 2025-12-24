@@ -133,18 +133,21 @@ func ParseCondition(expr string) (Condition, error) {
 func findNextLogicalOp(expr string) int {
 	depth := 0
 	for i := 0; i < len(expr); i++ {
-		if expr[i] == '(' {
+		switch expr[i] {
+		case '(':
 			depth++
-		} else if expr[i] == ')' {
+		case ')':
 			depth--
-		} else if depth == 0 {
-			// Check for AND operator
-			if i+5 <= len(expr) && expr[i:i+5] == " AND " {
-				return i
-			}
-			// Check for OR operator
-			if i+4 <= len(expr) && expr[i:i+4] == " OR " {
-				return i
+		default:
+			if depth == 0 {
+				// Check for AND operator
+				if i+5 <= len(expr) && expr[i:i+5] == " AND " {
+					return i
+				}
+				// Check for OR operator
+				if i+4 <= len(expr) && expr[i:i+4] == " OR " {
+					return i
+				}
 			}
 		}
 	}
@@ -391,7 +394,7 @@ func compareNumbers(a, b string, cmp func(float64, float64) bool) (bool, error) 
 	numA, errA := strconv.ParseFloat(a, 64)
 	numB, errB := strconv.ParseFloat(b, 64)
 	if errA != nil || errB != nil {
-		return false, nil // Non-numeric values don't match numeric comparisons
+		return false, fmt.Errorf("non-numeric operands for comparison: %s, %s", a, b)
 	}
 	return cmp(numA, numB), nil
 }

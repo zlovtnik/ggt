@@ -3,7 +3,9 @@ package validate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/zlovtnik/ggt/internal/transform"
 	"github.com/zlovtnik/ggt/internal/transform/filter"
@@ -72,6 +74,7 @@ func (r *rulesTransform) Execute(ctx context.Context, e interface{}) (interface{
 	}
 
 	if len(failedRules) > 0 {
+		sort.Strings(failedRules)
 		errMsg := fmt.Sprintf("validation rules failed: %v", failedRules)
 
 		switch r.cfg.OnError {
@@ -85,7 +88,7 @@ func (r *rulesTransform) Execute(ctx context.Context, e interface{}) (interface{
 			ev.Headers["_dlq_transform"] = "validate.rules"
 			return ev, nil
 		case "fail":
-			return nil, fmt.Errorf("%s", errMsg)
+			return nil, errors.New(errMsg)
 		}
 	}
 

@@ -73,16 +73,19 @@ type TransformConfig struct {
 type RedisEnrichment struct {
 	Addr string `yaml:"addr" json:"addr"`
 	// Password is sensitive and should only be stored in secure secrets or encrypted stores.
-	Password   string `yaml:"password,omitempty" json:"password,omitempty"`
-	DB         int    `yaml:"db" json:"db"`
-	MaxRetries int    `yaml:"max_retries" json:"max_retries"`
-	PoolSize   int    `yaml:"pool_size" json:"pool_size"`
+	Password   string        `yaml:"password,omitempty" json:"password,omitempty"`
+	DB         int           `yaml:"db" json:"db"`
+	MaxRetries int           `yaml:"max_retries" json:"max_retries"`
+	PoolSize   int           `yaml:"pool_size" json:"pool_size"`
+	CacheTTL   time.Duration `yaml:"cache_ttl" json:"cache_ttl"`
+	CacheSize  int           `yaml:"cache_size" json:"cache_size"`
 }
 
 type HTTPEnrichment struct {
 	DefaultTimeout  string `yaml:"default_timeout" json:"default_timeout"`
 	MaxIdleConns    int    `yaml:"max_idle_conns" json:"max_idle_conns"`
 	MaxConnsPerHost int    `yaml:"max_conns_per_host" json:"max_conns_per_host"`
+	MaxResponseSize int64  `yaml:"max_response_size" json:"max_response_size"`
 }
 
 // PostgresEnrichment captures the PostgreSQL connection details used by enrichment transforms.
@@ -94,6 +97,7 @@ type PostgresEnrichment struct {
 	MaxOpenConns    int           `yaml:"max_open_conns" json:"max_open_conns"`
 	MaxIdleConns    int           `yaml:"max_idle_conns" json:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime" json:"conn_max_lifetime"`
+	QueryTimeout    time.Duration `yaml:"query_timeout" json:"query_timeout"`
 }
 
 type EnrichmentConfig struct {

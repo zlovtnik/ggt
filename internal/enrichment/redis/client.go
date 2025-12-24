@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,9 +13,10 @@ import (
 
 // Client wraps a Redis client with connection pooling and caching.
 type Client struct {
-	client *redis.Client
-	cache  *enrichment.LRUCache
-	config *ClientConfig
+	client   *redis.Client
+	cache    *enrichment.LRUCache
+	config   *ClientConfig
+	cacheTTL time.Duration
 }
 
 // ClientConfig holds Redis client configuration.
@@ -81,15 +83,16 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 	cache := enrichment.NewLRUCache(cfg.CacheSize, *cfg.CacheTTL)
 
 	return &Client{
-		client: client,
-		cache:  cache,
-		config: cfg,
+		client:   client,
+		cache:    cache,
+		config:   cfg,
+		cacheTTL: *cfg.CacheTTL,
 	}, nil
 }
 
 // Get retrieves a value from Redis, with local caching using client's configured TTL.
 func (c *Client) Get(ctx context.Context, key string) (string, error) {
-	return c.GetWithTTL(ctx, key, *c.config.CacheTTL)
+	return c.GetWithTTL(ctx, key, c.cacheTTL)
 }
 
 // GetWithTTL retrieves a value from Redis, with local caching using a custom TTL.
@@ -106,7 +109,7 @@ func (c *Client) GetWithTTL(ctx context.Context, key string, ttl time.Duration) 
 	// Query Redis
 	val, err := c.client.Get(ctx, key).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return "", nil
 		}
 		return "", fmt.Errorf("redis: get failed: %w", err)
@@ -131,7 +134,7 @@ func (c *Client) GetJSON(ctx context.Context, key string, dest interface{}) erro
 	// Query Redis
 	val, err := c.client.Get(ctx, key).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil
 		}
 		return fmt.Errorf("redis: getjson failed: %w", err)
@@ -198,7 +201,7 @@ func (c *Client) Exists(ctx context.Context, keys ...string) (int64, error) {
 
 // HGet retrieves a field value from a Redis hash, with local caching using client's configured TTL.
 func (c *Client) HGet(ctx context.Context, key, field string) (string, error) {
-	return c.HGetWithTTL(ctx, key, field, *c.config.CacheTTL)
+	return c.HGetWithTTL(ctx, key, field, c.cacheTTL)
 }
 
 // HGetWithTTL retrieves a field value from a Redis hash, with local caching using a custom TTL.
@@ -214,7 +217,7 @@ func (c *Client) HGetWithTTL(ctx context.Context, key, field string, ttl time.Du
 
 	val, err := c.client.HGet(ctx, key, field).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return "", nil
 		}
 		return "", fmt.Errorf("redis: hget failed: %w", err)

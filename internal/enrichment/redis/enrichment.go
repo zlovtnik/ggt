@@ -98,7 +98,7 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 
 	if err != nil {
 		if e.cfg.DropOnError {
-			return nil, fmt.Errorf("enrich.redis: enrichment failed: %w", err)
+			return nil, transform.ErrDrop
 		}
 		return ev, nil
 	}
@@ -112,7 +112,7 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 
 	var parsed interface{}
 	if str, ok := enrichedData.(string); ok {
-		if str != "" && str[0] == '{' {
+		if str != "" && (str[0] == '{' || str[0] == '[') {
 			if err := json.Unmarshal([]byte(str), &parsed); err == nil {
 				enrichedData = parsed
 			}
@@ -135,7 +135,14 @@ func EnrichTransformFactory(client *Client) func(json.RawMessage) (transform.Tra
 
 // RegisterRedisEnrichment registers the enrich.redis transform with the provided client.
 func RegisterRedisEnrichment(cfg config.RedisEnrichment) error {
-	ttl := 5 * time.Minute
+	ttl := cfg.CacheTTL
+	if ttl == 0 {
+		ttl = 5 * time.Minute
+	}
+	cacheSize := cfg.CacheSize
+	if cacheSize == 0 {
+		cacheSize = 1000
+	}
 	clientCfg := &ClientConfig{
 		Addr:       cfg.Addr,
 		Password:   cfg.Password,
@@ -143,7 +150,7 @@ func RegisterRedisEnrichment(cfg config.RedisEnrichment) error {
 		MaxRetries: &cfg.MaxRetries,
 		PoolSize:   &cfg.PoolSize,
 		CacheTTL:   &ttl,
-		CacheSize:  1000,
+		CacheSize:  cacheSize,
 	}
 
 	client, err := NewClient(clientCfg)

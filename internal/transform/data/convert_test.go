@@ -116,7 +116,7 @@ func TestConvertTransform_Execute(t *testing.T) {
 			name:     "field not present",
 			config:   `{"field": "missing", "to": "int"}`,
 			input:    event.Event{Payload: map[string]interface{}{"value": 42}},
-			expected: nil, // no change
+			expected: 42, // no change to existing field
 			wantErr:  false,
 		},
 	}
@@ -138,13 +138,8 @@ func TestConvertTransform_Execute(t *testing.T) {
 					resultEv, ok := result.(event.Event)
 					require.True(t, ok)
 					val, exists := resultEv.GetField("value")
-					if tt.name == "field not present" {
-						assert.True(t, exists)
-						assert.Equal(t, 42, val)
-					} else {
-						assert.True(t, exists)
-						assert.Equal(t, tt.expected, val)
-					}
+					assert.True(t, exists)
+					assert.Equal(t, tt.expected, val)
 				}
 			}
 		})

@@ -24,8 +24,9 @@ type enrichConfig struct {
 
 // enrichTransform is the Postgres enrichment transform.
 type enrichTransform struct {
-	config *enrichConfig
-	client *Client
+	config       *enrichConfig
+	client       *Client
+	queryTimeout time.Duration
 }
 
 // Name returns the transform name.
@@ -69,14 +70,14 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 		val, ok := ev.GetField(paramName)
 		if !ok {
 			if e.config.DropOnError {
-				return nil, nil
+				return nil, transform.ErrDrop
 			}
 			return nil, fmt.Errorf("enrich.postgres: missing parameter %s", paramName)
 		}
 		args = append(args, val)
 	}
 
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, e.queryTimeout)
 	defer cancel()
 
 	var result interface{}
@@ -85,7 +86,7 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 		rows, err := e.client.Query(ctxWithTimeout, e.config.Query, args...)
 		if err != nil {
 			if e.config.DropOnError {
-				return nil, nil
+				return nil, transform.ErrDrop
 			}
 			return nil, fmt.Errorf("enrich.postgres execute: %w", err)
 		}
@@ -95,7 +96,7 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 		cols, err := rows.Columns()
 		if err != nil {
 			if e.config.DropOnError {
-				return nil, nil
+				return nil, transform.ErrDrop
 			}
 			return nil, fmt.Errorf("enrich.postgres: get columns failed: %w", err)
 		}
@@ -115,14 +116,14 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 
 			if err := rows.Scan(valuePtrs...); err != nil {
 				if e.config.DropOnError {
-					return nil, nil
+					return nil, transform.ErrDrop
 				}
 				return nil, fmt.Errorf("enrich.postgres: scan failed: %w", err)
 			}
 
 			row := make(map[string]interface{})
 			for i, col := range cols {
-				if len(outputSet) == 0 || outputSet[col] {
+				if outputSet[col] {
 					row[col] = values[i]
 				}
 			}
@@ -131,7 +132,7 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 
 		if err := rows.Err(); err != nil {
 			if e.config.DropOnError {
-				return nil, nil
+				return nil, transform.ErrDrop
 			}
 			return nil, fmt.Errorf("enrich.postgres: rows iteration failed: %w", err)
 		}
@@ -147,7 +148,7 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 				result = nil
 			} else {
 				if e.config.DropOnError {
-					return nil, nil
+					return nil, transform.ErrDrop
 				}
 				return nil, fmt.Errorf("enrich.postgres: scan failed: %w", err)
 			}
@@ -160,9 +161,12 @@ func (e *enrichTransform) Execute(ctx context.Context, payload interface{}) (int
 }
 
 // EnrichTransformFactory returns a factory function for creating Postgres enrichment transforms.
-func EnrichTransformFactory(client *Client) func(json.RawMessage) (transform.Transform, error) {
+func EnrichTransformFactory(client *Client, queryTimeout time.Duration) func(json.RawMessage) (transform.Transform, error) {
+	if queryTimeout <= 0 {
+		queryTimeout = 10 * time.Second // Default to 10 seconds
+	}
 	return func(raw json.RawMessage) (transform.Transform, error) {
-		t := &enrichTransform{client: client}
+		t := &enrichTransform{client: client, queryTimeout: queryTimeout}
 		if err := t.Configure(raw); err != nil {
 			return nil, err
 		}
@@ -186,7 +190,12 @@ func RegisterPostgresEnrichment(cfg *config.EnrichmentConfig) error {
 		return fmt.Errorf("enrich.postgres: create client failed: %w", err)
 	}
 
-	factory := EnrichTransformFactory(client)
+	queryTimeout := cfg.Postgres.QueryTimeout
+	if queryTimeout <= 0 {
+		queryTimeout = 10 * time.Second // Default to 10 seconds
+	}
+
+	factory := EnrichTransformFactory(client, queryTimeout)
 	transform.Register("enrich.postgres", factory)
 	return nil
 }

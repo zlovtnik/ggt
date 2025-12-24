@@ -10,8 +10,9 @@ import (
 )
 
 type extractConfig struct {
-	Source string `json:"source"`
-	Target string `json:"target"`
+	Source    string `json:"source"`
+	Target    string `json:"target"`
+	Overwrite bool   `json:"overwrite,omitempty"`
 }
 
 type extractTransform struct{ cfg extractConfig }
@@ -19,7 +20,7 @@ type extractTransform struct{ cfg extractConfig }
 func (e *extractTransform) Name() string { return "field.extract" }
 func (e *extractTransform) Configure(raw json.RawMessage) error {
 	if len(raw) == 0 {
-		return nil
+		return fmt.Errorf("configuration required: source and target must be specified")
 	}
 	if err := json.Unmarshal(raw, &e.cfg); err != nil {
 		return err
@@ -44,7 +45,13 @@ func (e *extractTransform) Execute(_ctx context.Context, ev interface{}) (interf
 
 	value, exists := event.GetField(e.cfg.Source)
 	if !exists {
-		return event, nil // or error? probably skip if not exists
+		return event, nil // source field not present, no-op
+	}
+
+	if !e.cfg.Overwrite {
+		if _, exists := event.GetField(e.cfg.Target); exists {
+			return nil, fmt.Errorf("target field %q already exists and overwrite is not enabled", e.cfg.Target)
+		}
 	}
 
 	result := event.SetField(e.cfg.Target, value)

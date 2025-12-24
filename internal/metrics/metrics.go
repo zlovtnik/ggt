@@ -52,19 +52,19 @@ func NewWithNamespace(namespace, subsystem string, buckets map[string][]float64)
 		RoutingMetrics: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "filter_route_total",
+			Name:      "transform_route_total",
 			Help:      "Messages routed by topic",
 		}, []string{"route", "target_topic"}),
 		ValidationMetrics: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "validate_total",
+			Name:      "transform_validate_total",
 			Help:      "Validation transform results",
 		}, []string{"validator", "result"}),
 		FilteredMessagesTotal: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
-			Name:      "filter_total",
+			Name:      "transform_filter_total",
 			Help:      "Messages filtered by condition",
 		}, []string{"filter", "action"}),
 	}

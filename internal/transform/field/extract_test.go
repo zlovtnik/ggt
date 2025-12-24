@@ -14,6 +14,7 @@ func TestExtractTransform(t *testing.T) {
 		config   extractConfig
 		input    event.Event
 		expected map[string]interface{}
+		wantErr  bool
 	}{
 		{
 			name: "extract nested field",
@@ -35,6 +36,7 @@ func TestExtractTransform(t *testing.T) {
 				},
 				"username": "john",
 			},
+			wantErr: false,
 		},
 		{
 			name: "extract non-existent field",
@@ -54,6 +56,46 @@ func TestExtractTransform(t *testing.T) {
 					"name": "john",
 				},
 			},
+			wantErr: false,
+		},
+		{
+			name: "extract to existing target without overwrite",
+			config: extractConfig{
+				Source:    "user.name",
+				Target:    "existing",
+				Overwrite: false,
+			},
+			input: event.Event{
+				Payload: map[string]interface{}{
+					"user": map[string]interface{}{
+						"name": "john",
+					},
+					"existing": "old_value",
+				},
+			},
+			expected: nil,
+			wantErr:  true,
+		},
+		{
+			name: "extract to existing target with overwrite",
+			config: extractConfig{
+				Source:    "user.name",
+				Target:    "existing",
+				Overwrite: true,
+			},
+			input: event.Event{
+				Payload: map[string]interface{}{
+					"user": map[string]interface{}{
+						"name": "john",
+					},
+					"existing": "old_value",
+				},
+			},
+			expected: map[string]interface{}{
+				"user":     map[string]interface{}{},
+				"existing": "john",
+			},
+			wantErr: false,
 		},
 	}
 
@@ -61,10 +103,14 @@ func TestExtractTransform(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			transform := &extractTransform{cfg: tt.config}
 			result, err := transform.Execute(context.Background(), tt.input)
-			assert.NoError(t, err)
-			resultEvent, ok := result.(event.Event)
-			assert.True(t, ok, "result should be of type event.Event")
-			assert.Equal(t, tt.expected, resultEvent.Payload)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				resultEvent, ok := result.(event.Event)
+				assert.True(t, ok, "result should be of type event.Event")
+				assert.Equal(t, tt.expected, resultEvent.Payload)
+			}
 		})
 	}
 }

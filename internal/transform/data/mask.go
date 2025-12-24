@@ -43,6 +43,7 @@ func (t *MaskTransform) Configure(configRaw json.RawMessage) error {
 	if config.Pattern == "" && config.KeepPrefix == 0 {
 		return fmt.Errorf("either pattern or keep_prefix must be specified")
 	}
+	// Note: When both pattern and keep_prefix are provided, keep_prefix applies to each regex match
 	if config.MaskChar == "" {
 		config.MaskChar = "*"
 	}
