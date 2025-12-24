@@ -1,49 +1,37 @@
 # Copilot Instructions for ggt
 
-## Grasp the high-level service
-- This repo implements the Transform Service described in [docs/architecture.md](docs/architecture.md) and wired out in [devspec.md](devspec.md); start there to understand the Kafka-to-Kafka flow, observability requirements, and the intended transform categories (field, data, enrichment, filter, validate).
-- The service consumes CDC events from Kafka, applies configurable transformation pipelines in-memory, and produces enriched events back to Kafka. It uses immutable `pkg/event.Event` structures to ensure thread safety and idempotency.
-- Core components: Kafka consumer/producer ([internal/consumer/](internal/consumer/), [internal/producer/](internal/producer/)), composable transform pipelines ([internal/transform/](internal/transform/)), enrichment sources (HTTP with circuit breaker, Postgres, Redis with TTL caching), and shared infrastructure (logging, metrics, health, config).
+## Architecture Snapshot
+- ggt is a Kafka-to-Kafka transform service; [cmd/transform/main.go](cmd/transform/main.go) wires config loading, consumer startup, pipeline execution, metrics, and health endpoints.
+- Pipelines are built from config descriptors via [internal/transform/pipeline.go](internal/transform/pipeline.go); the pipeline clones [pkg/event/event.go](pkg/event/event.go) payloads so downstream transforms mutate their own copy and can emit nil or transform.ErrDrop to filter.
+- Transforms live under [internal/transform](internal/transform) per category; each package has an init that calls transform.Register so blank imports in main keep registration automatic.
+- Kafka IO uses franz-go: [internal/consumer/kafka.go](internal/consumer/kafka.go) handles manual commit-on-success with handler timeouts and rebalance callbacks, while [internal/producer/kafka.go](internal/producer/kafka.go) wraps produce sync with configurable acks.
 
-## Local dev workflows
-- Use `make build` or `./scripts/build.sh` to compile the binary to `bin/ggt`; `make test` or `./scripts/test.sh` runs `go test -race -coverprofile=coverage.out ./...` for unit tests.
-- Run the service with `./bin/ggt` after copying `configs/config.example.yaml` to `configs/config.yaml` and adjusting Kafka brokers/topics.
-- Health checks: `curl http://localhost:8080/healthz` (example port; see `configs/config.example.yaml` for default); metrics at `http://localhost:9090/metrics` (only exposed when `service.metrics_port > 0`; see `configs/config.example.yaml` for default).
-- There is no deployment pipeline yet; `scripts/deploy.sh` prints a notice. Expect manual containerization/deployment plans in future `deployments/` directories.
+## Daily Workflows
+- Use make build or [scripts/build.sh](scripts/build.sh) to produce bin/ggt; make test and [scripts/test.sh](scripts/test.sh) run go test ./... with -race and coverage.
+- Copy [configs/config.example.yaml](configs/config.example.yaml) to configs/config.yaml (or set TRANSFORM_CONFIG_PATH) before running bin/ggt; the loader in [internal/config/loader.go](internal/config/loader.go) auto-selects YAML or JSON and fills defaults.
+- Run [scripts/run-benchmarks.sh](scripts/run-benchmarks.sh) for local performance baselines; results land in [benchmarks/results.txt](benchmarks/results.txt) and [BENCHMARK_REPORT.md](BENCHMARK_REPORT.md).
+- curl the healthz endpoint on service.health_port and scrape metrics_port for Prometheus once main is running.
 
-## Configuration, secrets, and conventions
-- The YAML schema in `configs/config.example.yaml` mirrors `internal/config/config.go`. Key sections: `service` (ports, timeouts), `kafka` (consumer/producer settings), `transforms.pipelines` (per-pipeline input/output topics, DLQ, and transform list).
-- Pipelines are defined as arrays of transforms with `type` (e.g., `field.rename`) and `config` (JSON object). Example:
+## Configuration Conventions
+- The schema in [internal/config/config.go](internal/config/config.go) mirrors [configs/config.example.yaml](configs/config.example.yaml); update both together and adjust validation in [internal/config/validate.go](internal/config/validate.go) when adding fields.
+- Pipelines config names input_topics to one output_topic and optional dlq_topic; each transform entry carries a type plus a JSON-like config object that Configure receives unchanged.
+- Metrics buckets, enrichment pools, and Redis cache settings come from metrics.buckets and enrichment.* blocks; defaults are injected by applyDefaults in loader.go.
+- Sensitive values such as Redis password and Postgres URL must remain empty in sample YAML and be provided via external secrets.
 
-```yaml
-transforms:
-  pipelines:
-    - transforms:
-        - type: "field.rename"
-          config:
-            mappings:
-              user_id: id
-```
-- Sensitive data (Redis passwords, Postgres URLs) are injected at deploy time; config fields use `omitempty` and optional validation.
-- Currently implemented transforms: field (add, extract, flatten, remove, rename, unflatten), data (case, convert, encode, format, hash, join, mask, regex, split), filter (condition, route), validate (required, rules, schema), enrichment (lookup via HTTP, Postgres, Redis).
+## Transform Patterns
+- Implement transform.Transform with Name, Configure(json.RawMessage), and Execute(ctx, payload) living alongside peers; see [internal/transform/field/rename.go](internal/transform/field/rename.go) for structure and error handling.
+- Register via transform.Register inside init; keep names unique and match the Type string in configuration exactly.
+- Execute must accept interface{} but typically assert to event.Event; use event.SetField and event.RemoveField helpers to preserve immutability, and return ErrDrop (from [internal/transform/transform.go](internal/transform/transform.go)) when filters should short-circuit.
+- Tests prefer [pkg/event/builder.go](pkg/event/builder.go) for fixture creation and expect transforms to be deterministic; table-driven tests live next to implementation with suffix _test.go.
 
-## Observability and runtime behavior
-- Logs from `internal/logging/logger.go` use zap with ISO 8601 timestamps; levels: info, warn, error, debug. Structured fields for service events.
-- Metrics from `internal/metrics/metrics.go`: `transform_processed_total`, `transform_dropped_total`, `transform_dlq_total`, histograms like `transform_duration_seconds` per transform type. Exposed at `/metrics` when `service.metrics_port > 0`.
-- Health server at `/healthz` returns 200 if alive; configured via `service.health_port` (see `configs/config.example.yaml` for default).
-- Graceful shutdown: All components (consumer, producer, servers) share `context` with `signal.NotifyContext`; use `shutdown.NewCoordinator` for consistent stopping.
+## Observability and Operations
+- Logging goes through zap configured in [internal/logging/logger.go](internal/logging/logger.go); log only metadata, never raw payloads.
+- Prometheus counters and histograms originate from [internal/metrics/metrics.go](internal/metrics/metrics.go); use provided vectors to label by transform and pipeline rather than creating new registries.
+- Health and metrics servers come from [internal/health/server.go](internal/health/server.go) and metrics.New(); ensure service.metrics_port > 0 to expose /metrics.
+- Graceful shutdown relies on [internal/shutdown/coordinator.go](internal/shutdown/coordinator.go) coordinating consumer.Stop, producer.Close, and HTTP servers with context deadlines.
 
-## What to edit first when adding functionality
-- For new transforms: Implement `Transform` interface (`Name()`, `Configure()`, `Execute()`) in appropriate subpackage (e.g., `internal/transform/field/`), register in `init()` via `transform.Register()` (defined in `internal/transform/registry.go`). Each concrete transform subpackage (e.g., `internal/transform/data/`, `internal/transform/field/`, etc.) must call `transform.Register()` from an `init()` function with a unique name (e.g., `func init() { transform.Register("field.rename", func(raw json.RawMessage) (transform.Transform, error) { ... }) }`). Blank imports in `cmd/transform/main.go` trigger registration: `_ "github.com/zlovtnik/ggt/internal/transform/data"`, `_ "github.com/zlovtnik/ggt/internal/transform/field"`, `_ "github.com/zlovtnik/ggt/internal/transform/filter"`, `_ "github.com/zlovtnik/ggt/internal/transform/validate"`. Follow package path conventions like `internal/transform/{category}/` for unambiguous registration.
-- For enrichment: Add to `internal/enrichment/` (e.g., `http/client.go` with circuit breaker pattern); implement caching for Redis/Postgres lookups.
-- Pipeline wiring: Update `cmd/transform/main.go` `startPipelineWorker` if needed; transforms are auto-registered via blank imports in `cmd/transform/main.go` (see above).
-- Always add unit tests (e.g., `*_test.go`) before integration; use `event.Builder` for test events.
-- When adding config fields: Update `configs/config.example.yaml` first, then `internal/config/config.go` structs and validation.
-
-## Signals for reviewers
-- Config changes: Update `configs/config.example.yaml` first, sync `internal/config/config.go` tags and validation.
-- New transforms/packages: Document in `devspec.md` and `docs/architecture.md` for design intent.
-- Metrics/logging changes: Reference specific counter/histogram names from `internal/metrics/metrics.go` for dashboard compatibility.
-- Code patterns: Prefer functional core (pure transforms) over imperative shell; use immutable events; follow existing error handling (wrap with context).
-
-Please review these notes and let me know if any section feels unclear or needs more detail so I can iterate.
+## Integration Touchpoints
+- Enrichment adapters under [internal/enrichment](internal/enrichment) implement caching (LRU for Redis, circuit breaker for HTTP, pgx pools for Postgres); reuse those helpers instead of creating ad hoc clients.
+- Filtering and routing transforms surface metrics via the counter vecs mentioned above; keep ErrDrop semantics consistent so pipeline-level DLQ handling can react correctly.
+- When extending Kafka handling, reuse the abstractions in [internal/consumer/offset_manager.go](internal/consumer/offset_manager.go) and [internal/consumer/processor.go](internal/consumer/processor.go) to keep commit logic centralized.
+- Always document new pipeline capabilities in [docs/architecture.md](docs/architecture.md) and [devspec.md](devspec.md) so future agents inherit accurate design context.

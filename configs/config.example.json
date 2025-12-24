@@ -1,6 +1,6 @@
 {
   "service": {
-    "name": "transform-service",
+    "name": "ggt",
     "log_level": "info",
     "metrics_port": 9090,
     "health_port": 8080,
@@ -11,7 +11,7 @@
       "brokers": [
         "localhost:9092"
       ],
-      "group_id": "transform-service",
+      "group_id": "ggt",
       "topics": [
         "raw.events"
       ],

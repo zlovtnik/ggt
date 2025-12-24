@@ -47,6 +47,7 @@ func (p *Pipeline) ID() string { return p.id }
 // Execute runs the pipeline synchronously. If a transform returns ErrDrop,
 // the pipeline halts and returns ErrDrop. The incoming event is cloned if it's
 // an event.Event so transforms can mutate safely.
+// Returns can be: event.Event (single), []event.Event (multiple), or nil (dropped).
 func (p *Pipeline) Execute(ctx context.Context, e interface{}) (interface{}, error) {
 	// clone event.Event values to preserve immutability
 	if ev, ok := e.(event.Event); ok {
@@ -70,7 +71,25 @@ func (p *Pipeline) Execute(ctx context.Context, e interface{}) (interface{}, err
 			}
 			return nil, fmt.Errorf("transform %s failed: %w", tr.Name(), err)
 		}
-		e = out
+
+		// Handle different output types
+		switch result := out.(type) {
+		case nil:
+			// Transform dropped the event
+			return nil, ErrDrop
+		case event.Event:
+			// Single event output
+			e = result
+		case []event.Event:
+			// Multiple event output - for now, process the first one and return all
+			if len(result) == 0 {
+				return nil, ErrDrop
+			}
+			// Return all events for the caller to handle
+			e = result
+		default:
+			e = result
+		}
 	}
 
 	return e, nil

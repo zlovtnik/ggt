@@ -6,6 +6,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.2
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.11.1
 	github.com/twmb/franz-go v1.20.6
 	github.com/xeipuuv/gojsonschema v1.2.0
