@@ -1,0 +1,219 @@
+# Example configuration demonstrating Phase 7 Filter & Validation transforms
+
+service:
+  name: transform-service
+  log_level: info
+  metrics_port: 9090
+  health_port: 8080
+  shutdown_timeout: 30s
+
+kafka:
+  consumer:
+    brokers:
+      - localhost:9092
+    group_id: transform-service
+    topics:
+      - raw.events
+    session_timeout: 45s
+    max_poll_interval: 5m
+    auto_offset_reset: earliest
+    enable_auto_commit: false
+    fetch_max_records: 1024
+    poll_interval_ms: 10
+  producer:
+    brokers:
+      - localhost:9092
+    compression: snappy
+    idempotent: true
+    max_in_flight: 5
+    batch_size: 16384
+    linger_ms: 10
+    acks: all
+
+transforms:
+  pipelines:
+    # Example 1: Event filtering and routing
+    - name: event_router
+      input_topics:
+        - raw.events
+      output_topic: routed.events
+      dlq_topic: dlq.events
+      transforms:
+        # First, filter for active events only
+        - type: filter.condition
+          config:
+            expression: "status == \"active\""
+
+        # Then route to different topics based on priority
+        - type: filter.route
+          config:
+            conditions:
+              high-priority: "priority > 8"
+              normal-priority: "priority >= 3 AND priority <= 8"
+              low-priority: "priority < 3"
+            default: unprocessed
+
+    # Example 2: User event validation pipeline
+    - name: user_event_validation
+      input_topics:
+        - raw.users
+      output_topic: valid.users
+      dlq_topic: dlq.users
+      transforms:
+        # Validate required fields
+        - type: validate.required
+          config:
+            fields:
+              - user_id
+              - email
+              - created_at
+            on_error: dlq
+
+        # Validate against schema
+        - type: validate.schema
+          config:
+            schema_file: /etc/schemas/user-event.json
+            on_error: dlq
+
+        # Apply custom business rules
+        - type: validate.rules
+          config:
+            rules:
+              valid_email_domain: "email =~ \".*@(company|example)\\.com$\""
+              reasonable_age: "age >= 18 AND age <= 150"
+              status_enum: "status in \"active,pending,inactive\""
+            on_error: dlq
+
+        # Route based on user tier for further processing
+        - type: filter.route
+          config:
+            conditions:
+              premium-users: "tier == \"gold\""
+              standard-users: "tier == \"silver\""
+              basic-users: "tier == \"bronze\""
+            default: free-users
+
+    # Example 3: Fraud detection filtering
+    - name: fraud_detection
+      input_topics:
+        - transactions
+      output_topic: clean.transactions
+      dlq_topic: suspicious.transactions
+      transforms:
+        # Filter suspicious patterns
+        - type: filter.condition
+          config:
+            expression: |
+              NOT (
+                (amount > 10000 AND time_of_day !~ "09:00-17:00") OR
+                (velocity_24h > 5) OR
+                (location contains "known_fraud_region")
+              )
+
+        # Validate transaction structure
+        - type: validate.required
+          config:
+            fields:
+              - transaction_id
+              - user_id
+              - amount
+              - timestamp
+            on_error: dlq
+
+        # Apply compliance rules
+        - type: validate.rules
+          config:
+            rules:
+              valid_amount: "amount > 0 AND amount < 1000000"
+              known_currency: "currency in \"USD,EUR,GBP,JPY\""
+              reasonable_time: "time_of_day != \"00:00\""
+            on_error: dlq
+
+    # Example 4: Multi-condition complex routing
+    - name: smart_router
+      input_topics:
+        - events
+      output_topic: processed.events
+      dlq_topic: dlq.events
+      transforms:
+        # Complex filtering with nested conditions
+        - type: filter.condition
+          config:
+            expression: |
+              ((status == "active") AND (tier in "gold,silver"))
+              OR
+              ((priority > 7) AND (NOT archived))
+
+        # Route based on multiple attributes
+        - type: filter.route
+          config:
+            conditions:
+              urgent-processing: |
+                (priority >= 8) AND (status == "active")
+              vip-processing: |
+                (tier == "gold") AND (status == "active")
+              standard-processing: |
+                (tier == "silver") OR (tier == "bronze")
+              archived-processing: |
+                archived == true
+            default: unclassified
+
+    # Example 5: Data quality pipeline
+    - name: data_quality
+      input_topics:
+        - raw.logs
+      output_topic: quality.logs
+      dlq_topic: invalid.logs
+      transforms:
+        # Validate required fields
+        - type: validate.required
+          config:
+            fields:
+              - timestamp
+              - level
+              - message
+              - source.host
+              - source.service
+            on_error: dlq
+
+        # Validate structure with JSON Schema
+        - type: validate.schema
+          config:
+            schema_file: /etc/schemas/log-event.json
+            on_error: dlq
+
+        # Apply data quality rules
+        - type: validate.rules
+          config:
+            rules:
+              valid_log_level: "level in \"DEBUG,INFO,WARN,ERROR,FATAL\""
+              has_timestamp: "timestamp != \"\""
+              valid_hostname: "source.host =~ \"^[a-z0-9.-]+$\""
+              valid_service: "source.service =~ \"^[a-z0-9_-]+$\""
+              message_not_empty: "message != \"\""
+            on_error: dlq
+
+        # Route logs by severity
+        - type: filter.route
+          config:
+            conditions:
+              critical-logs: "level in \"ERROR,FATAL\""
+              normal-logs: "level in \"DEBUG,INFO,WARN\""
+            default: unknown-logs
+
+# Note: Schema files should be created separately
+# Example /etc/schemas/user-event.json:
+#
+# {
+#   "$schema": "http://json-schema.org/draft-07/schema#",
+#   "type": "object",
+#   "properties": {
+#     "user_id": { "type": "string" },
+#     "email": { "type": "string", "format": "email" },
+#     "age": { "type": "integer", "minimum": 0 },
+#     "tier": { "type": "string", "enum": ["bronze", "silver", "gold"] },
+#     "status": { "type": "string", "enum": ["active", "pending", "inactive"] }
+#   },
+#   "required": ["user_id", "email", "status"],
+#   "additionalProperties": false
+# }

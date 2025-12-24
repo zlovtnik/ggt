@@ -1,6 +1,8 @@
 package config
 
-import "time"
+import (
+	"time"
+)
 
 // ServiceConfig captures the top-level service parameters.
 type ServiceConfig struct {
@@ -19,6 +21,18 @@ type ConsumerConfig struct {
 	MaxPollInterval  string   `yaml:"max_poll_interval" json:"max_poll_interval"`
 	AutoOffsetReset  string   `yaml:"auto_offset_reset" json:"auto_offset_reset"`
 	EnableAutoCommit bool     `yaml:"enable_auto_commit" json:"enable_auto_commit"`
+	FetchMaxRecords  int      `yaml:"fetch_max_records" json:"fetch_max_records"`
+	PollIntervalMs   int      `yaml:"poll_interval_ms" json:"poll_interval_ms"`
+}
+
+// ParsedSessionTimeout returns the parsed session timeout duration.
+func (c ConsumerConfig) ParsedSessionTimeout() (time.Duration, error) {
+	return time.ParseDuration(c.SessionTimeout)
+}
+
+// ParsedMaxPollInterval returns the parsed max poll interval duration.
+func (c ConsumerConfig) ParsedMaxPollInterval() (time.Duration, error) {
+	return time.ParseDuration(c.MaxPollInterval)
 }
 
 type ProducerConfig struct {
@@ -37,8 +51,8 @@ type KafkaConfig struct {
 }
 
 type TransformDescriptor struct {
-	Type   string                 `yaml:"type" json:"type"`
-	Config map[string]interface{} `yaml:"config" json:"config"`
+	Type   string      `yaml:"type" json:"type"`
+	Config interface{} `yaml:"config" json:"config"`
 }
 
 type PipelineConfig struct {
@@ -59,16 +73,19 @@ type TransformConfig struct {
 type RedisEnrichment struct {
 	Addr string `yaml:"addr" json:"addr"`
 	// Password is sensitive and should only be stored in secure secrets or encrypted stores.
-	Password   string `yaml:"password,omitempty" json:"password,omitempty"`
-	DB         int    `yaml:"db" json:"db"`
-	MaxRetries int    `yaml:"max_retries" json:"max_retries"`
-	PoolSize   int    `yaml:"pool_size" json:"pool_size"`
+	Password   string        `yaml:"password,omitempty" json:"password,omitempty"`
+	DB         int           `yaml:"db" json:"db"`
+	MaxRetries int           `yaml:"max_retries" json:"max_retries"`
+	PoolSize   int           `yaml:"pool_size" json:"pool_size"`
+	CacheTTL   time.Duration `yaml:"cache_ttl" json:"cache_ttl"`
+	CacheSize  int           `yaml:"cache_size" json:"cache_size"`
 }
 
 type HTTPEnrichment struct {
 	DefaultTimeout  string `yaml:"default_timeout" json:"default_timeout"`
 	MaxIdleConns    int    `yaml:"max_idle_conns" json:"max_idle_conns"`
 	MaxConnsPerHost int    `yaml:"max_conns_per_host" json:"max_conns_per_host"`
+	MaxResponseSize int64  `yaml:"max_response_size" json:"max_response_size"`
 }
 
 // PostgresEnrichment captures the PostgreSQL connection details used by enrichment transforms.
@@ -80,6 +97,7 @@ type PostgresEnrichment struct {
 	MaxOpenConns    int           `yaml:"max_open_conns" json:"max_open_conns"`
 	MaxIdleConns    int           `yaml:"max_idle_conns" json:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime" json:"conn_max_lifetime"`
+	QueryTimeout    time.Duration `yaml:"query_timeout" json:"query_timeout"`
 }
 
 type EnrichmentConfig struct {

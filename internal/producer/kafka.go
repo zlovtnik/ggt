@@ -3,7 +3,6 @@ package producer
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.uber.org/zap"
@@ -13,6 +12,24 @@ import (
 type ProducerConfig struct {
 	Brokers []string
 	Acks    string
+}
+
+// parseAcks converts string acks value to kgo.Acks
+func parseAcks(acks string, logger *zap.Logger) kgo.Acks {
+	switch acks {
+	case "0":
+		return kgo.NoAck()
+	case "1":
+		return kgo.LeaderAck()
+	case "all":
+		return kgo.AllISRAcks()
+	default:
+		// Default to all acks for safety
+		if logger != nil {
+			logger.Warn("invalid acks value, defaulting to 'all'", zap.String("acks", acks))
+		}
+		return kgo.AllISRAcks()
+	}
 }
 
 // Producer is a scaffold for a franz-go backed producer. Methods are
@@ -35,6 +52,7 @@ func NewProducer(cfg ProducerConfig, logger *zap.Logger) (*Producer, error) {
 
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(cfg.Brokers...),
+		kgo.RequiredAcks(parseAcks(cfg.Acks, logger)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create franz-go client: %w", err)
@@ -49,22 +67,17 @@ func (p *Producer) Send(ctx context.Context, topic string, key, value []byte) er
 	if p == nil {
 		return fmt.Errorf("producer is nil")
 	}
-	// TODO: implement production using p.client.ProduceSync or batching.
-	_ = topic
-	_ = key
-	_ = value
-	// simulate small delay for pipeline compatibility
-	select {
-	case <-time.After(1 * time.Millisecond):
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	record := &kgo.Record{
+		Topic: topic,
+		Key:   key,
+		Value: value,
 	}
+	return p.client.ProduceSync(ctx, record).FirstErr()
 }
 
 // Close shuts down the producer client.
 func (p *Producer) Close() error {
-	if p == nil {
+	if p == nil || p.client == nil {
 		return nil
 	}
 	p.client.Close()

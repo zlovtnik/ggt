@@ -934,3 +934,662 @@ Phase 4: Field Transforms (Week 3)
  Implement field.remove
  Implement field.add
  Write unit tests for each
+ Document usage examples
+4.2 Structure Operations
+
+ Implement field.flatten
+ Implement field.unflatten
+ Implement field.extract (nested)
+ Write unit tests
+ Document usage examples
+
+
+## Field Transform Reference
+
+### field.add
+Adds a new field to the event payload with a specified value.
+
+**Configuration:**
+```yaml
+type: field.add
+config:
+  field: "new_field_name"
+  value: "static_value"
+```
+
+**Example:**
+```yaml
+transforms:
+  - type: field.add
+    config:
+      field: "processed_at"
+      value: "2024-01-01T00:00:00Z"
+```
+
+### field.flatten
+Flattens the entire event payload into a flat structure using dotted notation for nested objects.
+
+**Configuration:**
+```yaml
+type: field.flatten
+config:
+  prefix: "optional_prefix_"
+```
+
+**Example (without prefix):**
+```yaml
+transforms:
+  - type: field.flatten
+    config: {}
+```
+Input: `{"user": {"address": {"street": "123 Main St", "city": "Anytown"}}, "item": "book"}`
+Output: `{"user.address.street": "123 Main St", "user.address.city": "Anytown", "item": "book"}`
+
+**Example (with prefix):**
+```yaml
+transforms:
+  - type: field.flatten
+    config:
+      prefix: "flat_"
+```
+Input: `{"user": {"address": {"street": "123 Main St", "city": "Anytown"}}, "item": "book"}`
+Output: `{"flat_user.address.street": "123 Main St", "flat_user.address.city": "Anytown", "flat_item": "book"}`
+
+### field.unflatten
+Converts flat dotted keys back into nested objects.
+
+**Configuration:**
+```yaml
+type: field.unflatten
+config:
+  fields: ["field1.subfield", "field2.subfield"]
+```
+
+**Example:**
+```yaml
+transforms:
+  - type: field.unflatten
+    config:
+      fields: ["address.street", "address.city"]
+```
+Input: `{"address.street": "123 Main St", "address.city": "Anytown"}`
+Output: `{"address": {"street": "123 Main St", "city": "Anytown"}}`
+
+### field.extract
+Extracts a nested field value and places it at a new location.
+
+**Configuration:**
+```yaml
+type: field.extract
+config:
+  source: "source.field.path"
+  target: "target.field.path"
+```
+
+**Example:**
+```yaml
+transforms:
+  - type: field.extract
+    config:
+      source: "user.profile.email"
+      target: "contact_email"
+```
+Input: `{"user": {"profile": {"email": "user@example.com"}}}`
+Output: `{"user": {"profile": {"email": "user@example.com"}}, "contact_email": "user@example.com"}`
+
+
+Phase 5: Data Transforms (Week 4)
+5.1 Type Conversions
+
+ Implement data.convert (string ↔ int/float/bool)
+ Add timestamp parsing and formatting
+ Implement safe type coercion
+ Write comprehensive unit tests
+
+5.2 String Operations
+
+ Implement data.format (sprintf-style)
+ Add case transformations (upper/lower/title)
+ Implement string split/join
+ Add regex matching and replacement
+ Write unit tests
+
+5.3 Encoding/Hashing
+
+ Implement data.encode (base64, URL, hex)
+ Implement data.hash (SHA256, MD5, bcrypt)
+ Implement data.mask (PII masking)
+ Write unit tests
+ Document security considerations
+
+
+Phase 6: Enrichment Transforms (Week 5)
+6.1 Redis Enrichment
+
+ Implement Redis client wrapper
+ Add connection pooling
+ Implement enrich.redis transform
+ Add local caching (LRU)
+ Write integration tests
+
+6.2 HTTP Enrichment
+
+ Implement HTTP client with retries
+ Add circuit breaker
+ Implement enrich.http transform
+ Add response caching
+ Write integration tests
+
+6.3 Postgres Enrichment
+
+ Implement Postgres connection pool
+ Add prepared statement caching
+ Implement enrich.postgres transform
+ Add result caching
+ Write integration tests
+
+
+Phase 7: Filter & Validation (Week 6)
+7.1 Filtering
+
+ Implement condition parser
+ Implement filter.condition transform
+ Add support for complex expressions
+ Write unit tests
+
+7.2 Routing
+
+ Implement filter.route (dynamic topic routing)
+ Add routing metrics
+ Write unit tests
+
+7.3 Validation
+
+ Implement validate.schema (JSON Schema)
+ Implement validate.rules (custom rules)
+ Implement validate.required (required fields)
+ Add DLQ integration for validation failures
+ Write unit tests
+
+
+Phase 8: Advanced Features (Week 7)
+8.1 Message Splitting
+
+ Implement filter.split transform
+ Handle array expansion
+ Write unit tests
+
+8.2 Conditional Execution
+
+ Add conditional transform execution
+ Implement branching pipelines
+ Write unit tests
+
+8.3 Error Handling
+
+ Implement custom error types
+ Add error context propagation
+ Implement retry strategies
+ Add DLQ routing for different error types
+
+
+Phase 9: Testing & Documentation (Week 8)
+9.1 Comprehensive Testing
+
+ Achieve >80% unit test coverage
+ Write integration tests for all transforms
+ Write end-to-end tests
+ Add benchmark tests
+ Add property-based tests (go-fuzz)
+
+9.2 Documentation
+
+ Write architecture documentation
+ Document all transform types
+ Create configuration reference
+ Write operations runbook
+ Add troubleshooting guide
+ Create migration guide from Rust EIP
+
+9.3 Examples
+
+ Create example configurations
+ Add transform cookbook
+ Write integration examples
+ Create performance tuning guide
+
+
+Phase 10: Production Readiness (Week 9)
+10.1 Performance Optimization
+
+ Profile CPU and memory usage
+ Optimize hot paths
+ Add connection pooling everywhere
+ Implement batching optimizations
+ Run load tests
+
+10.2 Deployment
+
+ Create production Dockerfile
+ Write Kubernetes manifests
+ Set up monitoring dashboards
+ Create alerting rules
+ Write deployment runbook
+
+10.3 Operational Tools
+
+ Create config validation CLI
+ Create transform testing CLI
+ Add dry-run mode
+ Implement graceful config reload
+ Add debug endpoints
+
+
+10. Dependencies
+Core Dependencies
+go// go.mod
+module github.com/yourusername/transform-service
+
+go 1.21
+
+require (
+    // Kafka
+    github.com/IBM/sarama v1.42.1
+    // Alternative: github.com/twmb/franz-go v1.15.0
+    
+    // Configuration
+    github.com/spf13/viper v1.18.0
+    gopkg.in/yaml.v3 v3.0.1
+    
+    // Logging
+    go.uber.org/zap v1.26.0
+    
+    // Metrics
+    github.com/prometheus/client_golang v1.18.0
+    
+    // HTTP
+    github.com/gorilla/mux v1.8.1
+    
+    // Redis
+    github.com/redis/go-redis/v9 v9.3.1
+    
+    // Postgres
+    github.com/jackc/pgx/v5 v5.5.1
+    
+    // JSON Schema
+    github.com/xeipuuv/gojsonschema v1.2.0
+    
+    // Expression evaluation
+    github.com/antonmedv/expr v1.15.5
+    
+    // Testing
+    github.com/stretchr/testify v1.8.4
+    github.com/testcontainers/testcontainers-go v0.27.0
+    
+    // Utilities
+    github.com/hashicorp/golang-lru/v2 v2.0.7
+    github.com/sony/gobreaker v0.5.0
+)
+
+11. Performance Considerations
+11.1 Throughput Targets
+
+Target: 10,000+ messages/second per instance
+Latency: p99 < 100ms for transform execution
+Memory: < 512MB per instance under normal load
+
+11.2 Optimization Strategies
+Concurrency
+go// Process messages concurrently within consumer group
+func (p *Processor) Run(ctx context.Context) error {
+    var wg sync.WaitGroup
+    semaphore := make(chan struct{}, p.config.Concurrency)
+    
+    for {
+        select {
+        case <-ctx.Done():
+            wg.Wait()
+            return nil
+        case msg := <-p.messages:
+            semaphore <- struct{}{}
+            wg.Add(1)
+            
+            go func(msg *sarama.ConsumerMessage) {
+                defer wg.Done()
+                defer func() { <-semaphore }()
+                
+                p.processMessage(ctx, msg)
+            }(msg)
+        }
+    }
+}
+Batching
+go// Batch producer writes
+type BatchProducer struct {
+    producer sarama.AsyncProducer
+    batchSize int
+    flushInterval time.Duration
+}
+
+func (bp *BatchProducer) Send(ctx context.Context, messages []*sarama.ProducerMessage) error {
+    for _, msg := range messages {
+        select {
+        case bp.producer.Input() <- msg:
+        case <-ctx.Done():
+            return ctx.Err()
+        }
+    }
+    return nil
+}
+Caching
+go// LRU cache for enrichment results
+type EnrichmentCache struct {
+    cache *lru.Cache[string, interface{}]
+    ttl   time.Duration
+}
+
+func (ec *EnrichmentCache) GetOrFetch(
+    key string,
+    fetcher func() (interface{}, error),
+) (interface{}, error) {
+    if val, ok := ec.cache.Get(key); ok {
+        return val, nil
+    }
+    
+    val, err := fetcher()
+    if err != nil {
+        return nil, err
+    }
+    
+    ec.cache.Add(key, val)
+    return val, nil
+}
+
+12. Security Considerations
+
+12.1 Threat Model
+
+**Assets:**
+- Event payloads containing sensitive data (PII, PHI, PCI)
+- Enrichment data from external services (Redis, HTTP APIs, Postgres)
+- Configuration secrets (API keys, database credentials)
+- Audit logs and metrics data
+- Service infrastructure (Kafka brokers, enrichment services)
+
+**Actors:**
+- Internal developers and operators
+- External attackers (hackers, nation-states)
+- Malicious insiders
+- Third-party enrichment service providers
+- Automated bots and scanners
+
+**Attack Vectors:**
+- Network interception (man-in-the-middle attacks)
+- Data exfiltration via compromised enrichment services
+- Configuration poisoning through supply chain attacks
+- Insider threats via privileged access
+- Cryptographic attacks on weak encryption implementations
+- Injection attacks on enrichment queries
+
+12.2 Prioritized Risk Table
+
+| Risk | Likelihood | Impact | Priority | Mitigation |
+|------|------------|--------|----------|------------|
+| Data exfiltration via unencrypted Kafka traffic | High | Critical | P1 | Implement TLS/mTLS for all Kafka connections |
+| Enrichment service credential compromise | Medium | Critical | P1 | Use secrets management with RBAC |
+| PII/PHI exposure in logs | High | High | P1 | Implement field-level masking/encryption |
+| Configuration secrets in source control | Low | Critical | P1 | Secrets management integration |
+| Insider data access abuse | Low | High | P2 | Audit logging with alerting |
+| Key management failures | Medium | High | P2 | Automated key rotation procedures |
+| Compliance violations (GDPR/CCPA) | Medium | High | P2 | Field-level controls and documentation |
+
+12.3 Data Categories and Field-Level Controls
+
+**PII (Personally Identifiable Information):**
+- Fields: email, phone, full_name, address, SSN, date_of_birth
+- Encrypt-at-rest: AES-256-GCM for database storage
+- Encrypt-in-transit: TLS 1.3 for all network communication
+- Encryption type: Deterministic encryption for searchable fields (email), random encryption for others
+- Masking vs Encryption: Mask email domains (user@***.com), encrypt full SSN
+
+**PHI (Protected Health Information):**
+- Fields: medical_records, diagnosis_codes, treatment_history
+- Encrypt-at-rest: AES-256-GCM with HIPAA-compliant key management
+- Encrypt-in-transit: TLS 1.3 with certificate pinning
+- Encryption type: Random encryption (not searchable)
+- Masking vs Encryption: Encrypt all PHI fields, no masking
+
+**PCI (Payment Card Industry):**
+- Fields: credit_card_number, cvv, expiration_date
+- Encrypt-at-rest: AES-256-GCM with PCI DSS compliance
+- Encrypt-in-transit: TLS 1.3 with HSTS
+- Encryption type: Tokenization for card numbers, encryption for metadata
+- Masking vs Encryption: Mask card numbers (****-****-****-1234), encrypt CVV
+
+**Internal Data:**
+- Fields: internal_ids, correlation_ids, metadata
+- Encrypt-at-rest: AES-256-GCM for sensitive internal data
+- Encrypt-in-transit: TLS 1.3
+- Encryption type: Deterministic for searchable IDs, random for others
+- Masking vs Encryption: No masking, encryption based on sensitivity
+
+12.4 Key Management and Rotation Strategy
+
+**KMS Choice:** AWS KMS for cloud deployments, HashiCorp Vault for on-premises/multi-cloud
+- AWS KMS: Integrated with IAM, automatic rotation support
+- Vault: Self-hosted with enterprise features, supports multiple backends
+
+**Rotation Frequency:**
+- Data encryption keys: Rotate every 90 days
+- Master keys: Rotate annually or on compromise
+- TLS certificates: Rotate every 60 days via ACM
+
+**Emergency Rotation Procedure:**
+1. Detect compromise (alerts, audit logs)
+2. Generate new key version in KMS
+3. Update service configuration with new key ID
+4. Re-encrypt existing data with new key (background job)
+5. Revoke old key after 24-hour grace period
+6. Update all dependent services and caches
+
+**Key Lifecycle:**
+- Generation: Automated via KMS API calls
+- Storage: KMS-managed HSMs, never in application memory
+- Usage: Envelope encryption (data keys wrapped by master keys)
+- Retirement: Keys marked inactive, retained for decryption of historical data
+- Destruction: After legal retention period (7+ years for compliance)
+
+12.5 Compliance Mapping
+
+**GDPR (EU General Data Protection Regulation):**
+- Controls: Field-level encryption, consent management, data minimization
+- Documentation: Data processing records, DPIA for high-risk processing, breach notification procedures
+- Required: Right to erasure (data deletion), data portability (export formats)
+
+**CCPA (California Consumer Privacy Act):**
+- Controls: Opt-out processing, data sales restrictions, encryption of personal information
+- Documentation: Privacy notices, data inventory, vendor assessments
+- Required: Consumer rights requests handling, data minimization practices
+
+**PCI-DSS (Payment Card Industry Data Security Standard):**
+- Controls: Tokenization of card data, encryption of transmission, access controls
+- Documentation: SAQ-A compliance, penetration testing reports, incident response plans
+- Required: Annual audits, quarterly vulnerability scans, secure development practices
+
+12.6 Secrets Management Integration
+
+**Vault/AWS Secrets Manager Usage:**
+- Store all credentials, API keys, and encryption keys
+- Use dynamic secrets for database connections (auto-rotation)
+- Integrate with service mesh (Istio/Consul) for automatic injection
+
+**Access Patterns:**
+- Application authentication via IAM roles or Vault tokens
+- Just-in-time credential issuance
+- Path-based access control (e.g., `/secret/transform/redis`)
+
+**RBAC (Role-Based Access Control):**
+- Roles: admin, operator, developer, auditor
+- Permissions: read-only for auditors, read-write for operators
+- Principle of least privilege: services only access required secrets
+
+**Audit Hooks:**
+- All secret access logged with actor, timestamp, resource
+- Integration with SIEM systems (Splunk, ELK)
+- Automated alerts on anomalous access patterns
+
+12.7 Audit Logging
+
+**Scope:**
+- All data access operations (read, write, transform)
+- Authentication and authorization events
+- Configuration changes
+- Secret access and rotation events
+- Error conditions and security violations
+
+**Retention:**
+- Security events: 7 years (compliance requirement)
+- Operational logs: 90 days
+- Metrics data: 1 year
+
+**Access Controls:**
+- Encrypted at rest with separate key from data
+- Role-based access: security team only
+- Immutable storage (WORM - Write Once Read Many)
+
+**Alerting Thresholds:**
+- Failed authentication attempts: >5 per minute
+- Unauthorized data access: Any occurrence
+- Secret access anomalies: >2 standard deviations from baseline
+- Configuration changes: All changes trigger alerts
+
+12.8 Security Implementation Timeline
+
+Complete all security controls implementation before Phase 10 (Production Readiness). Target completion by end of Week 9 to allow Week 10 for security testing and compliance validation. Key milestones:
+- Week 7: Threat model and risk assessment complete
+- Week 8: Encryption and key management implemented
+- Week 9: Compliance controls and audit logging operational
+
+
+13. Migration Strategy
+13.1 Gradual Migration
+
+Shadow Mode: Run Go transform service in parallel, compare outputs
+Partial Traffic: Route 10% → 50% → 100% of traffic to Go service
+Cutover: Disable Rust EIP stages, full Go transform processing
+Sunset: Decommission Rust transform components
+
+13.2 Feature Parity Checklist
+
+ All Rust EIP stages have Go equivalents
+ Performance matches or exceeds Rust implementation
+ Observability is equivalent or better
+ Error handling is production-ready
+ Documentation is complete
+
+
+14. Monitoring and Alerting
+14.1 Key Metrics to Monitor
+
+Messages processed per second
+Transform latency (p50, p99, p999)
+Error rates per transform
+DLQ message count
+Kafka consumer lag
+Enrichment cache hit rate
+Memory and CPU usage
+
+14.2 Alert Rules
+
+**Note:** The following alert thresholds are initial/default values based on typical service expectations. They should be reviewed and adjusted after observing real traffic patterns, SLA requirements, and system performance. Consider making thresholds configurable per-service via configuration for different environments (dev/staging/prod).
+
+```yaml
+groups:
+  - name: transform_service
+    rules:
+      - alert: HighTransformLatency
+        expr: histogram_quantile(0.99, rate(transform_duration_seconds_bucket[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High transform latency detected"
+          description: "99th percentile transform latency > 0.1s for 5+ minutes. Rationale: Target SLA of <100ms end-to-end latency; 0.1s threshold provides buffer for network/transform overhead. Unit: seconds. Tune based on observed p99 latency and SLA requirements."
+      
+      - alert: HighErrorRate
+        expr: rate(transform_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate in transforms"
+          description: "Transform error rate > 10 errors/minute sustained for 5+ minutes. Rationale: Expected error rate <1% under normal conditions; 10/min threshold alerts on significant processing issues. Unit: errors per minute. Adjust based on expected message volume and acceptable error rates."
+      
+      - alert: ConsumerLagHigh
+        expr: kafka_consumer_lag > 10000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer lag is high"
+          description: "Consumer lag > 10,000 messages sustained for 10+ minutes. Rationale: Assumes ~1,000 msg/sec throughput; 10K lag represents ~10 seconds of backlog. Unit: message count. Tune based on actual throughput and acceptable processing delay."
+```
+
+15. Next Steps
+
+Review and approve this specification
+Set up development environment (Go 1.21+, Kafka, Redis, Postgres)
+Start with Phase 1 (project setup and core infrastructure)
+Implement iteratively, testing each phase before moving forward
+Regular code reviews to ensure functional programming best practices
+Weekly demos to stakeholders showing progress
+
+
+Appendix A: Functional Programming Patterns in Go
+A.1 Pure Functions
+go// Pure function - no side effects, deterministic
+func add(a, b int) int {
+    return a + b
+}
+
+// Impure function - has side effects
+func addAndLog(a, b int) int {
+    result := a + b
+    log.Println(result) // Side effect!
+    return result
+}
+A.2 Immutability
+go// Event is immutable - methods return new instances
+func (e Event) SetField(path string, value interface{}) Event {
+    newEvent := e.Clone()
+    // Modify newEvent, return it
+    return newEvent
+}
+A.3 Higher-Order Functions
+go// Function that takes a function as argument
+func Map(data []int, fn func(int) int) []int {
+    result := make([]int, len(data))
+    for i, v := range data {
+        result[i] = fn(v)
+    }
+    return result
+}
+
+// Usage
+doubled := Map([]int{1, 2, 3}, func(x int) int { return x * 2 })
+A.4 Function Composition
+go// Compose two transform functions
+func Compose(f, g TransformFunc) TransformFunc {
+    return func(evt Event) (Event, error) {
+        intermediate, err := f(evt)
+        if err != nil {
+            return Event{}, err
+        }
+        return g(intermediate)
+    }
+}
+
+// Usage
+combined := Compose(renameTransform, enrichTransform)
+
+This specification provides a comprehensive roadmap for building a production-ready, functionally-oriented transform service in Go. The design prioritizes testability, maintainability, and performance while maintaining clear separation between pure transformation logic and I/O operations.

@@ -22,13 +22,19 @@ type Metadata struct {
 func (e Event) Clone() Event {
 	payloadCopy := deepCopyMap(e.Payload)
 
-	headersCopy := make(map[string]string, len(e.Headers))
-	for k, v := range e.Headers {
-		headersCopy[k] = v
+	var headersCopy map[string]string
+	if e.Headers != nil {
+		headersCopy = make(map[string]string, len(e.Headers))
+		for k, v := range e.Headers {
+			headersCopy[k] = v
+		}
 	}
 
-	keyCopy := make([]byte, len(e.Metadata.Key))
-	copy(keyCopy, e.Metadata.Key)
+	var keyCopy []byte
+	if e.Metadata.Key != nil {
+		keyCopy = make([]byte, len(e.Metadata.Key))
+		copy(keyCopy, e.Metadata.Key)
+	}
 
 	metadataCopy := e.Metadata
 	metadataCopy.Key = keyCopy
@@ -47,10 +53,31 @@ func deepCopyMap(m map[string]interface{}) map[string]interface{} {
 	}
 	result := make(map[string]interface{}, len(m))
 	for k, v := range m {
-		if nested, ok := v.(map[string]interface{}); ok {
-			result[k] = deepCopyMap(nested)
-		} else {
+		switch val := v.(type) {
+		case map[string]interface{}:
+			result[k] = deepCopyMap(val)
+		case []interface{}:
+			result[k] = deepCopySlice(val)
+		default:
 			result[k] = v
+		}
+	}
+	return result
+}
+
+func deepCopySlice(s []interface{}) []interface{} {
+	if s == nil {
+		return nil
+	}
+	result := make([]interface{}, len(s))
+	for i, item := range s {
+		switch val := item.(type) {
+		case map[string]interface{}:
+			result[i] = deepCopyMap(val)
+		case []interface{}:
+			result[i] = deepCopySlice(val)
+		default:
+			result[i] = item
 		}
 	}
 	return result
@@ -64,22 +91,16 @@ func (e Event) GetField(path string) (interface{}, bool) {
 	current := e.Payload
 	keys := strings.Split(path, ".")
 
-	for i, key := range keys {
-		value, ok := current[key]
-		if !ok {
+	for _, key := range keys[:len(keys)-1] {
+		if nested, ok := current[key].(map[string]interface{}); ok {
+			current = nested
+		} else {
 			return nil, false
 		}
+	}
 
-		if i == len(keys)-1 {
-			return value, true
-		}
-
-		nested, ok := value.(map[string]interface{})
-		if !ok {
-			return nil, false
-		}
-
-		current = nested
+	if value, ok := current[keys[len(keys)-1]]; ok {
+		return value, true
 	}
 
 	return nil, false

@@ -6,12 +6,15 @@ import (
 )
 
 type Metrics struct {
-	MessagesProcessed prometheus.Counter
-	MessagesDropped   prometheus.Counter
-	MessagesSentToDLQ prometheus.Counter
-	TransformDuration *prometheus.HistogramVec
-	TransformErrors   *prometheus.CounterVec
-	PipelineDuration  prometheus.Histogram
+	MessagesProcessed     prometheus.Counter
+	MessagesDropped       prometheus.Counter
+	MessagesSentToDLQ     prometheus.Counter
+	TransformDuration     *prometheus.HistogramVec
+	TransformErrors       *prometheus.CounterVec
+	PipelineDuration      prometheus.Histogram
+	RoutingMetrics        *prometheus.CounterVec
+	ValidationMetrics     *prometheus.CounterVec
+	FilteredMessagesTotal *prometheus.CounterVec
 }
 
 func New() *Metrics {
@@ -46,6 +49,24 @@ func NewWithNamespace(namespace, subsystem string, buckets map[string][]float64)
 			Help:      "Errors surfaced by transforms",
 		}, []string{"transform", "pipeline"}),
 		PipelineDuration: promauto.NewHistogram(pipelineHistogramOpts(namespace, subsystem, buckets)),
+		RoutingMetrics: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "transform_route_total",
+			Help:      "Messages routed by topic",
+		}, []string{"route", "target_topic"}),
+		ValidationMetrics: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "transform_validate_total",
+			Help:      "Validation transform results",
+		}, []string{"validator", "result"}),
+		FilteredMessagesTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "transform_filter_total",
+			Help:      "Messages filtered by condition",
+		}, []string{"filter", "action"}),
 	}
 }
 
@@ -56,7 +77,9 @@ func transformHistogramOpts(namespace, subsystem string, buckets map[string][]fl
 		Name:      "transform_duration_seconds",
 		Help:      "Duration of each transform stage",
 	}
-	if custom := customBuckets(buckets, "latency"); len(custom) > 0 {
+	if custom := customBuckets(buckets, "transform_latency"); len(custom) > 0 {
+		opts.Buckets = custom
+	} else if custom := customBuckets(buckets, "latency"); len(custom) > 0 {
 		opts.Buckets = custom
 	} else {
 		opts.Buckets = prometheus.ExponentialBuckets(0.001, 2, 10)
@@ -71,7 +94,9 @@ func pipelineHistogramOpts(namespace, subsystem string, buckets map[string][]flo
 		Name:      "pipeline_duration_seconds",
 		Help:      "End-to-end pipeline duration",
 	}
-	if custom := customBuckets(buckets, "latency"); len(custom) > 0 {
+	if custom := customBuckets(buckets, "pipeline_latency"); len(custom) > 0 {
+		opts.Buckets = custom
+	} else if custom := customBuckets(buckets, "latency"); len(custom) > 0 {
 		opts.Buckets = custom
 	} else {
 		opts.Buckets = prometheus.ExponentialBuckets(0.001, 2, 10)
