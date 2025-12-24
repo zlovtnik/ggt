@@ -335,31 +335,26 @@ func BenchmarkAggregateCountMemoryAllocation(b *testing.B) {
 
 	ctx := context.Background()
 
-	// Pre-create events to avoid measuring allocation time
-	events := make([]event.Event, b.N)
-	for i := 0; i < b.N; i++ {
-		events[i] = event.NewBuilder().
-			WithField("user_id", "user123").
-			WithField("amount", float64(i*10)).
-			Build()
-	}
-
-	// Pre-configure transform to avoid measuring setup time
-	baseTransform := &CountTransform{}
-	if err := baseTransform.Configure(rawConfig); err != nil {
-		b.Fatalf("failed to configure: %v", err)
-	}
+	// Use fixed event count for memory benchmark to avoid OOM with large b.N
+	const eventsPerIteration = 100
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		transform := &CountTransform{}
-		*transform = *baseTransform // Copy configured transform
-		// Create fresh state for each iteration
-		transform.windows = make(map[string]*CountWindowState)
+		if err := transform.Configure(rawConfig); err != nil {
+			b.Fatalf("failed to configure: %v", err)
+		}
 
-		if _, err := transform.Execute(ctx, events[i]); err != nil {
-			b.Fatalf("Execute failed: %v", err)
+		for j := 0; j < eventsPerIteration; j++ {
+			evt := event.NewBuilder().
+				WithField("user_id", "user123").
+				WithField("amount", float64(j*10)).
+				Build()
+
+			if _, err := transform.Execute(ctx, evt); err != nil {
+				b.Fatalf("Execute failed: %v", err)
+			}
 		}
 	}
 }
@@ -381,25 +376,25 @@ func BenchmarkAggregateCountParallel(b *testing.B) {
 
 	ctx := context.Background()
 
-	// Pre-configure transform to avoid measuring setup time
-	baseTransform := &CountTransform{}
-	if err := baseTransform.Configure(rawConfig); err != nil {
-		b.Fatalf("failed to configure: %v", err)
+	// Pre-create events to avoid measuring allocation time in parallel
+	events := make([]event.Event, 1000)
+	for i := range events {
+		events[i] = event.NewBuilder().
+			WithField("user_id", "user123").
+			WithField("amount", float64((i%50)*10)).
+			Build()
 	}
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		transform := &CountTransform{}
-		*transform = *baseTransform // Copy configured transform
-		// Create fresh state for each goroutine
-		transform.windows = make(map[string]*CountWindowState)
+		if err := transform.Configure(rawConfig); err != nil {
+			b.Fatalf("failed to configure: %v", err)
+		}
 
 		idx := 0
 		for pb.Next() {
-			evt := event.NewBuilder().
-				WithField("user_id", "user123").
-				WithField("amount", float64((idx%50)*10)).
-				Build()
+			evt := events[idx%len(events)]
 			if _, err := transform.Execute(ctx, evt); err != nil {
 				b.Errorf("Execute failed: %v", err)
 				return

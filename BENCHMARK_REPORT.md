@@ -74,50 +74,38 @@ December 24, 2025
 - Multiple partition keys increase memory by ~2x (1.2 MB vs 747 KB)
 
 ## Window Transform Status
-✅ **Status**: Window transform benchmarks completed successfully with cron-based scheduling
-- **Solution**: Integrated robfig/cron for reliable timer management
-- **Architecture**: Synchronous testing with `ForceEmitAllWindows()` for benchmark compatibility
-- **Performance**: Excellent results across all window types and configurations
+❌ **Status**: Window transform benchmarks failed due to synchronization issues and timeouts
+- **Issue**: Goroutine deadlocks and timeouts in timer scheduling logic
+- **Architecture**: Attempted cron-based scheduling but encountered synchronization problems
+- **Performance**: Benchmarks timed out; unable to complete testing
 
-### Window Transform Results ✅
+### Window Transform Results ❌
 | Scenario | Ops/sec | Latency | Memory/op | Allocs/op |
 |----------|---------|---------|-----------|-----------|
-| Tumbling small (10 events) | 245,637 | 13.9μs | ~17.7KB | 258 |
-| Tumbling medium (100 events) | 19,021 | 189.9μs | ~246.7KB | 6,606 |
-| Tumbling large (1000 events) | 256 | 13.9ms | ~13.4MB | 515,582 |
-| Duration-based (100ms) | 54,404 | 66.9μs | ~93.4KB | 2,074 |
-| Hybrid event+duration | 35,629 | 101.5μs | ~124.8KB | 3,449 |
-| Multiple partitions (5 users) | 36,436 | 99.9μs | ~156KB | 2,795 |
-| Single aggregation | 49,568 | 72.8μs | ~92.5KB | 2,059 |
-| Multiple aggregations (5 funcs) | 6,187 | 582.6μs | ~615.8KB | 22,233 |
-| Memory allocation focus | 17,244 | 208.5μs | ~257.5KB | 6,985 |
-| Parallel execution | 62,362 | 57.7μs | ~92.7KB | 2,059 |
+| Tumbling small (10 events) | N/A | N/A | N/A | N/A |
+| Tumbling medium (100 events) | N/A | N/A | N/A | N/A |
+| Tumbling large (1000 events) | N/A | N/A | N/A | N/A |
+| Duration-based (100ms) | N/A | N/A | N/A | N/A |
+| Hybrid event+duration | N/A | N/A | N/A | N/A |
+| Multiple partitions (5 users) | N/A | N/A | N/A | N/A |
+| Single aggregation | N/A | N/A | N/A | N/A |
+| Multiple aggregations (5 funcs) | N/A | N/A | N/A | N/A |
+| Memory allocation focus | N/A | N/A | N/A | N/A |
+| Parallel execution | N/A | N/A | N/A | N/A |
 
 **Key Findings**:
-- **Cron integration successful**: No more goroutine deadlocks or timeouts
-- **Event-count windows**: Excellent performance, linear scaling with window size
-- **Duration-based windows**: Efficient cron scheduling with minimal overhead
-- **Multiple aggregations**: ~9x cost increase but still well under <100ms target
-- **Parallel execution**: Outstanding scaling with 62k ops/sec
-- **Memory efficiency**: Predictable growth, no memory leaks detected
-- **Verdict**: Meets all <100ms targets; production-ready for real-time windowing
+- **Cron integration failed**: Goroutine deadlocks and timeouts prevent completion
+- **Event-count windows**: Unable to test due to synchronization issues
+- **Duration-based windows**: Efficient cron scheduling attempted but failed
+- **Multiple aggregations**: Not tested
+- **Parallel execution**: Not tested
+- **Memory efficiency**: Not tested
+- **Verdict**: Does not meet targets; requires fixes for synchronization issues
 
 This allows benchmarks to inject a no-op emitter and isolate aggregation logic from I/O.
 
----
+// ...existing code...
 
-## Performance Targets vs Actual
-
-| Metric | Target | Achieved | Status |
-|--------|--------|----------|--------|
-| Split (10 items) | <100μs | 36.7μs | ✅ Pass |
-| Split (100 items) | <10ms | 3.4ms | ✅ Pass |
-| Aggregate (10 events) | <50μs | 12.5μs | ✅ Pass |
-| Aggregate (100 events) | <1ms | 778.8μs | ✅ Pass |
-| Memory per event | <2KB | varies | ⚠️ See notes |
-| Throughput (p99) | 10k msg/s | See split.array Large | ✅ Scales linearly |
-
----
 
 ## Recommendations
 

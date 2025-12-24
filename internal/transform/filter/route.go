@@ -9,6 +9,21 @@ import (
 	"github.com/zlovtnik/ggt/pkg/event"
 )
 
+const (
+	// maxTopicNameLength is the maximum allowed length for Kafka topic names
+	maxTopicNameLength = 249
+)
+
+// validateTopicCharacters checks for invalid characters in topic names
+func validateTopicCharacters(name string) error {
+	for _, char := range name {
+		if char == '\x00' || char == '\n' || char == '\r' {
+			return fmt.Errorf("topic name contains invalid character")
+		}
+	}
+	return nil
+}
+
 // RouteConfig represents the configuration for filter.route transform
 type RouteConfig struct {
 	Conditions []ConditionRoute `json:"conditions"` // ordered list of condition -> topic mappings
@@ -41,16 +56,14 @@ func (r *routeTransform) Configure(raw json.RawMessage) error {
 
 	// Validate default topic if specified
 	if r.cfg.Default != "" {
-		if len(r.cfg.Default) > 249 {
-			return fmt.Errorf("default topic name too long (max 249 characters)")
+		if len(r.cfg.Default) > maxTopicNameLength {
+			return fmt.Errorf("default topic name too long (max %d characters)", maxTopicNameLength)
 		}
 		if r.cfg.Default[0] == '.' || r.cfg.Default[len(r.cfg.Default)-1] == '.' {
 			return fmt.Errorf("default topic name cannot start or end with a dot")
 		}
-		for _, char := range r.cfg.Default {
-			if char == '\x00' || char == '\n' || char == '\r' {
-				return fmt.Errorf("default topic name contains invalid character")
-			}
+		if err := validateTopicCharacters(r.cfg.Default); err != nil {
+			return fmt.Errorf("default topic: %w", err)
 		}
 	}
 
@@ -63,16 +76,14 @@ func (r *routeTransform) Configure(raw json.RawMessage) error {
 			return fmt.Errorf("condition %d: topic cannot be empty", i)
 		}
 		// Validate topic name (basic Kafka topic name validation)
-		if len(entry.Topic) > 249 {
-			return fmt.Errorf("condition %d: topic name too long (max 249 characters)", i)
+		if len(entry.Topic) > maxTopicNameLength {
+			return fmt.Errorf("condition %d: topic name too long (max %d characters)", i, maxTopicNameLength)
 		}
 		if entry.Topic[0] == '.' || entry.Topic[len(entry.Topic)-1] == '.' {
 			return fmt.Errorf("condition %d: topic name cannot start or end with a dot", i)
 		}
-		for _, char := range entry.Topic {
-			if char == '\x00' || char == '\n' || char == '\r' {
-				return fmt.Errorf("condition %d: topic name contains invalid character", i)
-			}
+		if err := validateTopicCharacters(entry.Topic); err != nil {
+			return fmt.Errorf("condition %d: %w", i, err)
 		}
 		// Validate the condition expression by parsing it
 		if _, err := ParseCondition(entry.Condition); err != nil {

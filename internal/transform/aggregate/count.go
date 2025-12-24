@@ -25,6 +25,7 @@ type CountWindowState struct {
 	StartTime  time.Time
 	EventCount int                        // running count of events processed
 	Aggregates map[string]*AggregateState // per-aggregation running state
+	LastSeen   time.Time                  // last time this window was accessed
 }
 
 // CountConfig represents configuration for count-based aggregation
@@ -32,6 +33,7 @@ type CountConfig struct {
 	KeyField     string        `json:"key_field"`
 	Count        int           `json:"count"` // emit when window reaches this many events
 	Aggregations []Aggregation `json:"aggregations"`
+	IdleTimeout  time.Duration `json:"idle_timeout"` // optional, default 1h; windows idle longer than this are evicted
 }
 
 // CountTransform implements count-based aggregation
@@ -83,6 +85,14 @@ func (c *CountTransform) Configure(raw json.RawMessage) error {
 	}
 
 	c.windows = make(map[string]*CountWindowState)
+
+	if c.config.IdleTimeout == 0 {
+		c.config.IdleTimeout = time.Hour
+	}
+
+	// Start background eviction to prevent unbounded memory growth
+	go c.evictionLoop()
+
 	return nil
 }
 
@@ -118,6 +128,8 @@ func (c *CountTransform) Execute(ctx context.Context, e interface{}) (interface{
 		}
 		c.windows[windowKey] = state
 	}
+
+	state.LastSeen = time.Now()
 
 	// Check if we need to emit after this event
 	shouldEmit := state.EventCount+1 >= c.config.Count
@@ -183,7 +195,7 @@ func (c *CountTransform) Execute(ctx context.Context, e interface{}) (interface{
 }
 
 // updateAggregationsIncremental updates running aggregate state for a single event
-func (c *CountTransform) updateAggregationsIncremental(state *CountWindowState, ev event.Event) error {
+func (c *CountTransform) updateAggregationsIncremental(state *CountWindowState, ev event.Event) {
 	for _, agg := range c.config.Aggregations {
 		// Get the field value
 		fieldValue, exists := ev.GetField(agg.Field)
@@ -209,12 +221,8 @@ func (c *CountTransform) updateAggregationsIncremental(state *CountWindowState, 
 			continue
 		}
 
-		// Get or create aggregate state
-		aggState, exists := state.Aggregates[agg.As]
-		if !exists {
-			aggState = &AggregateState{}
-			state.Aggregates[agg.As] = aggState
-		}
+		// Get aggregate state (already initialized when window was created)
+		aggState := state.Aggregates[agg.As]
 
 		// Update running aggregates
 		switch agg.Function {
@@ -235,7 +243,23 @@ func (c *CountTransform) updateAggregationsIncremental(state *CountWindowState, 
 			}
 		}
 	}
-	return nil
+}
+
+// evictionLoop periodically removes idle windows to prevent unbounded memory growth
+func (c *CountTransform) evictionLoop() {
+	ticker := time.NewTicker(c.config.IdleTimeout / 4) // check every 1/4 of idle timeout
+	defer ticker.Stop()
+
+	for range ticker.C {
+		c.windowMux.Lock()
+		now := time.Now()
+		for key, state := range c.windows {
+			if now.Sub(state.LastSeen) > c.config.IdleTimeout {
+				delete(c.windows, key)
+			}
+		}
+		c.windowMux.Unlock()
+	}
 }
 
 // NewCountTransform creates a new count-based aggregation transform

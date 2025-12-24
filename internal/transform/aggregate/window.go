@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/robfig/cron/v3"
 	"github.com/zlovtnik/ggt/internal/transform"
 	"github.com/zlovtnik/ggt/pkg/event"
 )
@@ -28,20 +27,12 @@ type Aggregation struct {
 	As       string `json:"as"`       // output field name
 }
 
-// AggregationState holds running state for an aggregation
-type AggregationState struct {
-	Count int     `json:"count"`
-	Sum   float64 `json:"sum"`
-	Min   float64 `json:"min"`
-	Max   float64 `json:"max"`
-}
-
 // WindowState holds the state for a single window
 type WindowState struct {
 	StartTime  time.Time
 	EndTime    time.Time
 	Events     []event.Event
-	Aggregates map[string]*AggregationState
+	Aggregates map[string]*AggregateState
 }
 
 // WindowTransform implements windowed aggregation
@@ -49,7 +40,6 @@ type WindowTransform struct {
 	config     WindowConfig
 	windows    map[string]*WindowState // keyed by window key
 	windowMux  sync.RWMutex
-	scheduler  *cron.Cron             // cron scheduler for window expirations (deprecated, use timers)
 	entries    map[string]*time.Timer // maps window keys to timers
 	entriesMux sync.Mutex
 	emitFunc   func(ctx context.Context, events []event.Event) error
@@ -99,8 +89,6 @@ func (w *WindowTransform) Configure(raw json.RawMessage) error {
 
 	w.windows = make(map[string]*WindowState)
 	w.entries = make(map[string]*time.Timer)
-	w.scheduler = cron.New()
-	w.scheduler.Start()
 
 	return nil
 }
@@ -134,7 +122,7 @@ func (w *WindowTransform) Execute(ctx context.Context, e interface{}) (interface
 			StartTime:  now,
 			EndTime:    now.Add(w.config.MaxDuration),
 			Events:     make([]event.Event, 0),
-			Aggregates: make(map[string]*AggregationState),
+			Aggregates: make(map[string]*AggregateState),
 		}
 		w.windows[windowKey] = state
 
@@ -302,12 +290,15 @@ func (w *WindowTransform) updateAggregations(state *WindowState) error {
 
 		// Initialize aggregate state if missing
 		if state.Aggregates[agg.As] == nil {
-			state.Aggregates[agg.As] = &AggregationState{
-				Count: 0,
-				Sum:   0,
-				Min:   num,
-				Max:   num,
+			minVal := num
+			maxVal := num
+			state.Aggregates[agg.As] = &AggregateState{
+				Count: 1,
+				Sum:   num,
+				Min:   &minVal,
+				Max:   &maxVal,
 			}
+			continue
 		}
 		aggState := state.Aggregates[agg.As]
 
@@ -322,13 +313,15 @@ func (w *WindowTransform) updateAggregations(state *WindowState) error {
 			aggState.Sum += num
 			aggState.Count++
 		case "min":
-			if num < aggState.Min || aggState.Count == 0 {
-				aggState.Min = num
+			if aggState.Min == nil || num < *aggState.Min {
+				minVal := num
+				aggState.Min = &minVal
 			}
 			aggState.Count++
 		case "max":
-			if num > aggState.Max || aggState.Count == 0 {
-				aggState.Max = num
+			if aggState.Max == nil || num > *aggState.Max {
+				maxVal := num
+				aggState.Max = &maxVal
 			}
 			aggState.Count++
 		default:
@@ -369,9 +362,17 @@ func (w *WindowTransform) ForceEmitAllWindows(ctx context.Context) error {
 				case "avg":
 					value = aggState.Sum / float64(aggState.Count)
 				case "min":
-					value = aggState.Min
+					if aggState.Min != nil {
+						value = *aggState.Min
+					} else {
+						value = nil
+					}
 				case "max":
-					value = aggState.Max
+					if aggState.Max != nil {
+						value = *aggState.Max
+					} else {
+						value = nil
+					}
 				}
 				resultEvent = resultEvent.SetField(agg.As, value)
 			}
@@ -408,7 +409,7 @@ func (w *WindowTransform) SetEmitFunc(fn func(ctx context.Context, events []even
 	w.emitMux.Unlock()
 }
 
-// Stop gracefully shuts down the window transform scheduler and timers
+// Stop gracefully shuts down the window transform timers
 func (w *WindowTransform) Stop() {
 	// Stop all timers
 	w.entriesMux.Lock()
@@ -417,12 +418,6 @@ func (w *WindowTransform) Stop() {
 	}
 	w.entries = make(map[string]*time.Timer)
 	w.entriesMux.Unlock()
-
-	// Stop cron scheduler if used
-	if w.scheduler != nil {
-		ctx := w.scheduler.Stop()
-		<-ctx.Done()
-	}
 }
 
 // NewWindowTransform creates a new windowed aggregation transform

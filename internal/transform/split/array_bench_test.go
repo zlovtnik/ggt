@@ -265,7 +265,9 @@ func BenchmarkSplitArrayStringElements(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		transform.Execute(ctx, evt)
+		if _, err := transform.Execute(ctx, evt); err != nil {
+			b.Fatalf("transform.Execute error: %v", err)
+		}
 	}
 }
 
@@ -342,20 +344,22 @@ func BenchmarkSplitArrayParallel(b *testing.B) {
 
 	ctx := context.Background()
 
+	// Validate result once before benchmarking
+	result, err := transform.Execute(ctx, evt)
+	if err != nil {
+		b.Fatalf("execute failed: %v", err)
+	}
+	if events, ok := result.([]event.Event); !ok || len(events) != mediumArraySize {
+		b.Fatalf("unexpected result: %v", result)
+	}
+
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			result, err := transform.Execute(ctx, evt)
-			if err != nil {
+			if _, err := transform.Execute(ctx, evt); err != nil {
 				b.Errorf("execute failed: %v", err)
 				return
 			}
-			b.StopTimer()
-			if events, ok := result.([]event.Event); !ok || len(events) != mediumArraySize {
-				b.Errorf("unexpected result: %v", result)
-				return
-			}
-			b.StartTimer()
 		}
 	})
 }

@@ -30,7 +30,7 @@ func (s *splitRegexTransform) Configure(raw json.RawMessage) error {
 		return fmt.Errorf("split regex configuration required")
 	}
 	if err := json.Unmarshal(raw, &s.cfg); err != nil {
-		return err
+		return fmt.Errorf("failed to unmarshal split regex config: %w", err)
 	}
 	if s.cfg.Field == "" {
 		return fmt.Errorf("field path is required")

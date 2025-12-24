@@ -23,7 +23,7 @@ type Transform interface {
 	//
 	// Return value semantics:
 	// - (event, nil): Transform successful, event processed
-	// - ([]event.Event, nil): Transform successful, multiple events produced
+	// - (slice of events, nil): Transform successful, multiple events produced
 	// - (nil, nil): Event dropped silently (no error, no output)
 	// - (nil, ErrDrop): Event explicitly filtered/dropped (sentinel for filtering)
 	// - (nil, err): Error occurred during transform (err != ErrDrop)

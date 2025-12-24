@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -272,7 +274,11 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 		}
 
 		// Send to output - handle both single and multiple events
-		outputTopic := info.cfg.OutputTopic
+		outputTopic := strings.TrimSpace(info.cfg.OutputTopic)
+		if outputTopic == "" {
+			logger.Error("output topic is not configured or empty")
+			return fmt.Errorf("output topic is required but not configured")
+		}
 
 		switch result := result.(type) {
 		case event.Event:
@@ -288,27 +294,42 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 			}
 		case []event.Event:
 			// Multiple event output - send each to the output topic
+			var failedIndices []int
+			dlqTopic := info.cfg.DLQTopic
 			for i, evt := range result {
 				outputValue, err := json.Marshal(evt.Payload)
 				if err != nil {
 					logger.Error("failed to marshal output payload", zap.Error(err), zap.Int("index", i), zap.Any("payload", evt.Payload))
-					return err
+					failedIndices = append(failedIndices, i)
+					continue
 				}
-				// For multiple messages, we might want to modify the key to avoid duplicates
-				// For now, use the same key but this could be configurable
+				// For multiple messages, append index to key to avoid duplicates (using "multi-%d" for nil keys)
 				key := r.Key
 				if len(result) > 1 {
 					// Append index to key to make it unique
 					if key == nil {
-						key = []byte(fmt.Sprintf("multi-%d", i))
+						key = strconv.AppendInt([]byte("multi-"), int64(i), 10)
 					} else {
-						key = []byte(fmt.Sprintf("%s-%d", string(key), i))
+						key = strconv.AppendInt(append(key, '-'), int64(i), 10)
 					}
 				}
 				if err := w.prod.Send(hctx, outputTopic, key, outputValue); err != nil {
 					logger.Error("failed to send to output", zap.Error(err), zap.Int("index", i))
-					return err
+					// Send to DLQ if configured
+					if dlqTopic != "" {
+						dlqValue, marshalErr := json.Marshal(evt.Payload)
+						if marshalErr != nil {
+							logger.Error("failed to marshal DLQ payload", zap.Error(marshalErr), zap.Int("index", i))
+						} else if sendErr := w.prod.Send(hctx, dlqTopic, key, dlqValue); sendErr != nil {
+							logger.Error("failed to send to DLQ", zap.Error(sendErr), zap.Int("index", i))
+						}
+					}
+					failedIndices = append(failedIndices, i)
+					continue
 				}
+			}
+			if len(failedIndices) > 0 {
+				return fmt.Errorf("send failures at indices: %v", failedIndices)
 			}
 		default:
 			logger.Error("unexpected result type from pipeline", zap.String("type", fmt.Sprintf("%T", result)))

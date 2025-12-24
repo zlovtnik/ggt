@@ -221,7 +221,8 @@ func TestSplitArrayTransform_DefaultKey(t *testing.T) {
 	result, err := trans.Execute(context.Background(), ev)
 	require.NoError(t, err)
 
-	results := result.([]event.Event)
+	results, ok := result.([]event.Event)
+	require.True(t, ok, "result should be []event.Event")
 	require.Equal(t, 1, len(results))
 	val, ok := results[0].GetField("value")
 	require.True(t, ok)

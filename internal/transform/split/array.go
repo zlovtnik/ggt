@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/zlovtnik/ggt/internal/transform"
 	"github.com/zlovtnik/ggt/pkg/event"
@@ -27,7 +28,7 @@ func (s *splitArrayTransform) Configure(raw json.RawMessage) error {
 		return fmt.Errorf("split array configuration required")
 	}
 	if err := json.Unmarshal(raw, &s.cfg); err != nil {
-		return err
+		return fmt.Errorf("failed to unmarshal split array config: %w", err)
 	}
 	if s.cfg.Field == "" {
 		return fmt.Errorf("field path is required")
@@ -56,13 +57,15 @@ func (s *splitArrayTransform) Execute(ctx context.Context, e interface{}) (inter
 		return []event.Event{}, nil
 	}
 
-	// Convert to slice
-	var items []interface{}
-	switch v := arrayVal.(type) {
-	case []interface{}:
-		items = v
-	default:
-		return nil, fmt.Errorf("field %s is not an array (got %T)", s.cfg.Field, v)
+	// Convert to slice using reflection to support typed slices
+	val := reflect.ValueOf(arrayVal)
+	if val.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("field %s is not an array (got %T)", s.cfg.Field, arrayVal)
+	}
+
+	items := make([]interface{}, val.Len())
+	for i := 0; i < val.Len(); i++ {
+		items[i] = val.Index(i).Interface()
 	}
 
 	// Create one event per array element

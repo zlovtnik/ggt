@@ -97,6 +97,3 @@ func (p *Pipeline) Execute(ctx context.Context, e interface{}) (interface{}, err
 
 // ctxKeyTransformIndex is a context key for transform index.
 type ctxKeyTransformIndex struct{}
-
-// ctxKeyMultipleOutputs is a context key for storing multiple output events.
-type ctxKeyMultipleOutputs struct{}

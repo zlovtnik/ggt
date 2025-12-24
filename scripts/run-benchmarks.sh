@@ -110,6 +110,10 @@ if [ "$RUN_SPLIT" = true ]; then
     echo "" >> "$OUTPUT_FILE"
     
     cd "$PROJECT_ROOT"
+    PROFILE_FLAGS=""
+    if [ "$PROFILE" = true ]; then
+        PROFILE_FLAGS="-cpuprofile=benchmarks/split_cpu.prof -memprofile=benchmarks/split_mem.prof"
+    fi
     go test -run=^$ -bench='^BenchmarkSplitArray' $BENCH_FLAGS $PROFILE_FLAGS ./internal/transform/split 2>&1 | tee -a "$OUTPUT_FILE"
     
     echo "" >> "$OUTPUT_FILE"
@@ -123,6 +127,10 @@ if [ "$RUN_AGGREGATE" = true ]; then
     echo "" >> "$OUTPUT_FILE"
     
     cd "$PROJECT_ROOT"
+    PROFILE_FLAGS=""
+    if [ "$PROFILE" = true ]; then
+        PROFILE_FLAGS="-cpuprofile=benchmarks/aggregate_count_cpu.prof -memprofile=benchmarks/aggregate_count_mem.prof"
+    fi
     go test -run=^$ -bench='^BenchmarkAggregateCount' $BENCH_FLAGS $PROFILE_FLAGS ./internal/transform/aggregate 2>&1 | tee -a "$OUTPUT_FILE"
     
     echo "" >> "$OUTPUT_FILE"
@@ -134,6 +142,10 @@ if [ "$RUN_AGGREGATE" = true ]; then
     echo "" >> "$OUTPUT_FILE"
     
     cd "$PROJECT_ROOT"
+    PROFILE_FLAGS=""
+    if [ "$PROFILE" = true ]; then
+        PROFILE_FLAGS="-cpuprofile=benchmarks/aggregate_window_cpu.prof -memprofile=benchmarks/aggregate_window_mem.prof"
+    fi
     go test -run=^$ -bench='^BenchmarkAggregateWindow' $BENCH_FLAGS $PROFILE_FLAGS ./internal/transform/aggregate 2>&1 | tee -a "$OUTPUT_FILE"
     
     echo "" >> "$OUTPUT_FILE"
@@ -147,13 +159,26 @@ echo "To compare results with previous runs, use:"
 echo "  benchstat $OUTPUT_FILE <previous_results.txt>"
 
 # If profiles were generated, show analysis
-if [ "$PROFILE" = true ] && [ -f "benchmarks/cpu.prof" ]; then
+if [ "$PROFILE" = true ]; then
     echo ""
     echo "Generated profiles:"
-    echo "  CPU profile: benchmarks/cpu.prof"
-    echo "  Memory profile: benchmarks/mem.prof"
+    
+    if [ "$RUN_SPLIT" = true ] && [ -f "benchmarks/split_cpu.prof" ] && [ -f "benchmarks/split_mem.prof" ]; then
+        echo "  Split array CPU profile: benchmarks/split_cpu.prof"
+        echo "  Split array memory profile: benchmarks/split_mem.prof"
+    fi
+    
+    if [ "$RUN_AGGREGATE" = true ] && [ -f "benchmarks/aggregate_count_cpu.prof" ] && [ -f "benchmarks/aggregate_count_mem.prof" ]; then
+        echo "  Aggregate count CPU profile: benchmarks/aggregate_count_cpu.prof"
+        echo "  Aggregate count memory profile: benchmarks/aggregate_count_mem.prof"
+    fi
+    
+    if [ "$RUN_AGGREGATE" = true ] && [ -f "benchmarks/aggregate_window_cpu.prof" ] && [ -f "benchmarks/aggregate_window_mem.prof" ]; then
+        echo "  Aggregate window CPU profile: benchmarks/aggregate_window_cpu.prof"
+        echo "  Aggregate window memory profile: benchmarks/aggregate_window_mem.prof"
+    fi
+    
     echo ""
     echo "View profiles with:"
-    echo "  go tool pprof benchmarks/cpu.prof"
-    echo "  go tool pprof benchmarks/mem.prof"
+    echo "  go tool pprof <profile_file>"
 fi

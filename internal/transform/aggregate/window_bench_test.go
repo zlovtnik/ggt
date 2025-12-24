@@ -23,33 +23,6 @@ func BenchmarkAggregateWindowTumblingSmall(b *testing.B) {
 	if err != nil {
 		b.Fatalf("failed to marshal config: %v", err)
 	}
-	if err != nil {
-		b.Fatalf("failed to marshal config: %v", err)
-	}
-	if err != nil {
-		b.Fatalf("failed to marshal config: %v", err)
-	}
-	if err != nil {
-		b.Fatalf("failed to marshal config: %v", err)
-	}
-	if err != nil {
-		b.Fatalf("failed to marshal config: %v", err)
-	}
-	if err != nil {
-		b.Fatalf("failed to marshal config: %v", err)
-	}
-	if err != nil {
-		b.Fatalf("failed to marshal config: %v", err)
-	}
-	if err != nil {
-		b.Fatalf("failed to marshal config: %v", err)
-	}
-	if err != nil {
-		b.Fatalf("failed to marshal config: %v", err)
-	}
-	if err != nil {
-		b.Fatalf("failed to marshal config: %v", err)
-	}
 
 	var results []event.Event
 	emitFunc := func(ctx context.Context, events []event.Event) error {
@@ -57,11 +30,12 @@ func BenchmarkAggregateWindowTumblingSmall(b *testing.B) {
 		return nil
 	}
 
+	w := &WindowTransform{}
+	w.Configure(raw)
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		results = results[:0] // Clear results
-		w := &WindowTransform{}
-		w.Configure(raw)
 		w.SetEmitFunc(emitFunc)
 
 		for j := 0; j < 10; j++ {
@@ -96,11 +70,12 @@ func BenchmarkAggregateWindowTumblingMedium(b *testing.B) {
 		return nil
 	}
 
+	w := &WindowTransform{}
+	w.Configure(raw)
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		results = results[:0] // Clear results
-		w := &WindowTransform{}
-		w.Configure(raw)
 		w.SetEmitFunc(emitFunc)
 
 		for j := 0; j < 100; j++ {
@@ -127,7 +102,10 @@ func BenchmarkAggregateWindowTumblingLarge(b *testing.B) {
 			{Field: "amount", Function: "sum", As: "total"},
 		},
 	}
-	raw, _ := json.Marshal(config)
+	raw, err := json.Marshal(config)
+	if err != nil {
+		b.Fatalf("failed to marshal config: %v", err)
+	}
 
 	var results []event.Event
 	emitFunc := func(ctx context.Context, events []event.Event) error {
@@ -135,11 +113,14 @@ func BenchmarkAggregateWindowTumblingLarge(b *testing.B) {
 		return nil
 	}
 
+	w := &WindowTransform{}
+	if err := w.Configure(raw); err != nil {
+		b.Fatalf("failed to configure window: %v", err)
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		results = results[:0] // Clear results
-		w := &WindowTransform{}
-		w.Configure(raw)
 		w.SetEmitFunc(emitFunc)
 
 		for j := 0; j < 1000; j++ {
@@ -166,7 +147,10 @@ func BenchmarkAggregateWindowDurationBased(b *testing.B) {
 			{Field: "amount", Function: "sum", As: "total"},
 		},
 	}
-	raw, _ := json.Marshal(config)
+	raw, err := json.Marshal(config)
+	if err != nil {
+		b.Fatalf("failed to marshal config: %v", err)
+	}
 
 	var results []event.Event
 	emitFunc := func(ctx context.Context, events []event.Event) error {
@@ -174,11 +158,14 @@ func BenchmarkAggregateWindowDurationBased(b *testing.B) {
 		return nil
 	}
 
+	w := &WindowTransform{}
+	if err := w.Configure(raw); err != nil {
+		b.Fatalf("failed to configure window: %v", err)
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		results = results[:0]
-		w := &WindowTransform{}
-		w.Configure(raw)
 		w.SetEmitFunc(emitFunc)
 
 		for j := 0; j < 50; j++ {
@@ -204,12 +191,18 @@ func BenchmarkAggregateWindowHybridEventDuration(b *testing.B) {
 			{Field: "amount", Function: "avg", As: "average"},
 		},
 	}
-	raw, _ := json.Marshal(config)
+	raw, err := json.Marshal(config)
+	if err != nil {
+		b.Fatalf("failed to marshal config: %v", err)
+	}
+
+	w := &WindowTransform{}
+	if err := w.Configure(raw); err != nil {
+		b.Fatalf("failed to configure window: %v", err)
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		w := &WindowTransform{}
-		w.Configure(raw)
 		// Set a no-op emit function to ensure windows are emitted during benchmark
 		w.SetEmitFunc(func(ctx context.Context, events []event.Event) error {
 			return nil // Discard emitted events
@@ -237,7 +230,10 @@ func BenchmarkAggregateWindowMultiplePartitions(b *testing.B) {
 			{Field: "amount", Function: "sum", As: "total"},
 		},
 	}
-	raw, _ := json.Marshal(config)
+	raw, err := json.Marshal(config)
+	if err != nil {
+		b.Fatalf("failed to marshal config: %v", err)
+	}
 
 	var results []event.Event
 	emitFunc := func(ctx context.Context, events []event.Event) error {
@@ -245,11 +241,14 @@ func BenchmarkAggregateWindowMultiplePartitions(b *testing.B) {
 		return nil
 	}
 
+	w := &WindowTransform{}
+	if err := w.Configure(raw); err != nil {
+		b.Fatalf("failed to configure window: %v", err)
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		results = results[:0]
-		w := &WindowTransform{}
-		w.Configure(raw)
 		w.SetEmitFunc(emitFunc)
 
 		for partition := 0; partition < 5; partition++ {
@@ -276,7 +275,10 @@ func BenchmarkAggregateWindowSingleAggregation(b *testing.B) {
 			{Field: "amount", Function: "sum", As: "total"},
 		},
 	}
-	raw, _ := json.Marshal(config)
+	raw, err := json.Marshal(config)
+	if err != nil {
+		b.Fatalf("failed to marshal config: %v", err)
+	}
 
 	var results []event.Event
 	emitFunc := func(ctx context.Context, events []event.Event) error {
@@ -284,11 +286,14 @@ func BenchmarkAggregateWindowSingleAggregation(b *testing.B) {
 		return nil
 	}
 
+	w := &WindowTransform{}
+	if err := w.Configure(raw); err != nil {
+		b.Fatalf("failed to configure window: %v", err)
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		results = results[:0]
-		w := &WindowTransform{}
-		w.Configure(raw)
 		w.SetEmitFunc(emitFunc)
 
 		for j := 0; j < 100; j++ {
@@ -314,7 +319,10 @@ func BenchmarkAggregateWindowMemoryAllocation(b *testing.B) {
 			{Field: "amount", Function: "sum", As: "total"},
 		},
 	}
-	raw, _ := json.Marshal(config)
+	raw, err := json.Marshal(config)
+	if err != nil {
+		b.Fatalf("failed to marshal config: %v", err)
+	}
 
 	b.RunParallel(func(pb *testing.PB) {
 		var results []event.Event
@@ -323,10 +331,13 @@ func BenchmarkAggregateWindowMemoryAllocation(b *testing.B) {
 			return nil
 		}
 
+		w := &WindowTransform{}
+		if err := w.Configure(raw); err != nil {
+			b.Fatalf("failed to configure window: %v", err)
+		}
+
 		for pb.Next() {
 			results = results[:0]
-			w := &WindowTransform{}
-			w.Configure(raw)
 			w.SetEmitFunc(emitFunc)
 
 			for j := 0; j < 50; j++ {
