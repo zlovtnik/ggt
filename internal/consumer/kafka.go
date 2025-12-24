@@ -203,7 +203,7 @@ func (c *Consumer) Start(handler func(context.Context, *kgo.Record) error) error
 				select {
 				case c.errCh <- abortErr:
 				default:
-					// errCh is buffered, but avoid blocking if it's full
+					c.logger.Warn("error channel buffer full, dropping error", zap.Error(abortErr))
 				}
 				break fetchLoop
 			}

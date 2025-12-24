@@ -19,8 +19,9 @@ type Transform interface {
 	// Configure receives the raw config for the transform.
 	Configure(cfg json.RawMessage) error
 	// Execute performs the transform. It receives a context and an event.
-	// It returns the transformed event or an error.
+	// It returns the transformed event(s) or an error.
 	// A returned ErrDrop indicates the event should be filtered/dropped.
+	// Returns can be: event.Event (single), []event.Event (multiple), or nil (dropped).
 	Execute(ctx context.Context, e interface{}) (interface{}, error)
 }
 

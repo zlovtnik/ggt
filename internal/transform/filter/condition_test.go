@@ -293,6 +293,58 @@ func TestRouteTransform(t *testing.T) {
 		},
 	}
 
+	// Test topic validation
+	validationTests := []struct {
+		name       string
+		config     string
+		wantErrMsg string
+	}{
+		{
+			name: "invalid topic name - starts with dot",
+			config: `{
+				"conditions": [
+					{"condition": "tier == \"gold\"", "topic": ".invalid"}
+				]
+			}`,
+			wantErrMsg: "topic name cannot start or end with a dot",
+		},
+		{
+			name: "invalid topic name - ends with dot",
+			config: `{
+				"conditions": [
+					{"condition": "tier == \"gold\"", "topic": "invalid."}
+				]
+			}`,
+			wantErrMsg: "topic name cannot start or end with a dot",
+		},
+		{
+			name: "invalid topic name - too long",
+			config: `{
+				"conditions": [
+					{"condition": "tier == \"gold\"", "topic": "very_long_topic_name_that_exceeds_the_maximum_allowed_length_of_two_hundred_and_forty_nine_characters_and_should_fail_validation_1234567890_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyzxxx"}
+				]
+			}`,
+			wantErrMsg: "topic name too long",
+		},
+		{
+			name: "invalid default topic - starts with dot",
+			config: `{
+				"conditions": [],
+				"default": ".invalid"
+			}`,
+			wantErrMsg: "default topic name cannot start or end with a dot",
+		},
+	}
+
+	for _, tt := range validationTests {
+		t.Run(tt.name, func(t *testing.T) {
+			trans := NewRouteTransform()
+			err := trans.Configure(json.RawMessage(tt.config))
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErrMsg)
+		})
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			trans := NewRouteTransform()

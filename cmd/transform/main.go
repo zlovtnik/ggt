@@ -18,9 +18,11 @@ import (
 	"github.com/zlovtnik/ggt/internal/producer"
 	"github.com/zlovtnik/ggt/internal/shutdown"
 	"github.com/zlovtnik/ggt/internal/transform"
+	_ "github.com/zlovtnik/ggt/internal/transform/aggregate"
 	_ "github.com/zlovtnik/ggt/internal/transform/data"
 	_ "github.com/zlovtnik/ggt/internal/transform/field"
 	_ "github.com/zlovtnik/ggt/internal/transform/filter"
+	_ "github.com/zlovtnik/ggt/internal/transform/split"
 	_ "github.com/zlovtnik/ggt/internal/transform/validate"
 	"github.com/zlovtnik/ggt/pkg/event"
 	"go.uber.org/zap"
@@ -260,13 +262,42 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 			return err
 		}
 
-		// Send to output
+		// Send to output - handle both single and multiple events
 		outputTopic := info.cfg.OutputTopic
-		outputValue, _ := json.Marshal(result.(event.Event).Payload)
-		if err := w.prod.Send(hctx, outputTopic, r.Key, outputValue); err != nil {
-			logger.Error("failed to send to output", zap.Error(err))
-			return err
+
+		switch result := result.(type) {
+		case event.Event:
+			// Single event output
+			outputValue, _ := json.Marshal(result.Payload)
+			if err := w.prod.Send(hctx, outputTopic, r.Key, outputValue); err != nil {
+				logger.Error("failed to send to output", zap.Error(err))
+				return err
+			}
+		case []event.Event:
+			// Multiple event output - send each to the output topic
+			for i, evt := range result {
+				outputValue, _ := json.Marshal(evt.Payload)
+				// For multiple messages, we might want to modify the key to avoid duplicates
+				// For now, use the same key but this could be configurable
+				key := r.Key
+				if len(result) > 1 {
+					// Append index to key to make it unique
+					if key == nil {
+						key = []byte(fmt.Sprintf("multi-%d", i))
+					} else {
+						key = []byte(fmt.Sprintf("%s-%d", string(key), i))
+					}
+				}
+				if err := w.prod.Send(hctx, outputTopic, key, outputValue); err != nil {
+					logger.Error("failed to send to output", zap.Error(err), zap.Int("index", i))
+					return err
+				}
+			}
+		default:
+			logger.Error("unexpected result type from pipeline", zap.String("type", fmt.Sprintf("%T", result)))
+			return fmt.Errorf("unexpected result type: %T", result)
 		}
+
 		return nil
 	}
 
