@@ -1,6 +1,6 @@
 # The service configuration can also be read from a JSON file pointed to by TRANSFORM_CONFIG_PATH or adjusted via environment variables such as TRANSFORM_SERVICE_LOG_LEVEL.
 service:
-  name: transform-service
+  name: ggt
   log_level: info
   metrics_port: 9090
   health_port: 8080
@@ -10,7 +10,7 @@ kafka:
   consumer:
     brokers:
       - localhost:9092
-    group_id: transform-service
+    group_id: ggt
     topics:
       - raw.events
     session_timeout: 45s

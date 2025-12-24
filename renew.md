@@ -628,7 +628,7 @@ Week 7: PHASE 4 (Showcase)
 ```bash
 # 1. Clone & setup
 git clone <repo>
-cd transform-service
+cd ggt
 make dev-setup
 
 # 2. Run tests

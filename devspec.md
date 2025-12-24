@@ -4,17 +4,9 @@ Transform Service Development Specification
 
 This specification outlines the development of a standalone Transform Service in Go that sits between CDC ingestion pipelines and downstream consumers. The service consumes raw CDC events from Kafka, applies configurable transformation pipelines, and produces enriched events back to Kafka.
 
-**Current Status**: The core service is fully implemented and tested, with comprehensive transform categories supporting field manipulation, data transformation, external enrichment (HTTP/Redis/Postgres), filtering, and validation. The service follows functional programming principles with immutable data structures, comprehensive observability, and production-ready infrastructure.
-
-**Key Achievements**:
-- ✅ Complete transform pipeline with 20+ transform types
-- ✅ Production-ready architecture with Kafka integration
-- ✅ Comprehensive testing (60%+ coverage) with race detection
-- ✅ Full observability stack (metrics, logging, health checks)
-- ✅ External enrichment with circuit breakers and caching
-- ✅ Configuration-driven pipeline orchestration
-
-**Next Phase**: Production readiness with containerization, deployment automation, and advanced monitoring.
+- **Major Completed Features**: Core architecture with 28+ transform types, full Kafka integration, comprehensive observability (metrics/logging/health), and external enrichment with caching/circuit breakers
+- **Immediate Priorities (2-4 weeks)**: Phase 7 production readiness including performance optimization, containerization, and advanced monitoring dashboards
+- **Medium/Long-term Goals (4-8 weeks and 3-6 months)**: Enterprise features like custom scripting, streaming analytics, ML integration, and full operational deployment automation
 
 1. Architecture Overview
 1.1 High-Level Design
@@ -201,8 +193,7 @@ ggt/
 │   ├── test.sh                     # Test runner
 │   └── deploy.sh                   # Deployment script (placeholder)
 ├── docs/
-│   ├── architecture.md             # Architecture documentation
-│   └── devspec.md                  # This development specification
+│   └── architecture.md             # Architecture documentation
 ├── bin/
 │   └── ggt                        # Compiled binary
 ├── go.mod
@@ -214,7 +205,7 @@ ggt/
 4. Configuration Schema
 4.1 Main Configuration (YAML)
 yamlservice:
-  name: transform-service
+  name: ggt
   log_level: info
   metrics_port: 9090
   health_port: 8080
@@ -224,7 +215,7 @@ kafka:
   consumer:
     brokers:
       - localhost:9092
-    group_id: transform-service
+    group_id: ggt
     topics:
       - raw.events
     session_timeout: 45s
@@ -347,7 +338,7 @@ gopackage transform
 
 import (
     "context"
-    "github.com/yourusername/transform-service/pkg/event"
+    "github.com/zlovtnik/ggt/pkg/event"
 )
 
 // Transform represents a single transformation stage
@@ -422,7 +413,7 @@ gopackage transform
 
 import (
     "context"
-    "github.com/yourusername/transform-service/pkg/event"
+    "github.com/zlovtnik/ggt/pkg/event"
 )
 
 // Pipeline executes a series of transforms
@@ -463,12 +454,15 @@ func (p *Pipeline) ExecuteAsync(ctx context.Context, evt event.Event) (event.Eve
 }
 
 6. Example Transform Implementations
+
+**Note**: The Go code snippets in this section are template examples that demonstrate the expected structure and interfaces for implementing transforms. They are not pseudocode - they represent complete, runnable implementations that can be used as starting points for new transform development. Import paths must be adjusted to match your project's module name (e.g., replace `github.com/zlovtnik/ggt` with your actual module path). This applies to examples in ranges 346-363, 467-504, and 506-576.
+
 6.1 Field Rename Transform
 gopackage field
 
 import (
     "context"
-    "github.com/yourusername/transform-service/pkg/event"
+    "github.com/zlovtnik/ggt/pkg/event"
 )
 
 type RenameConfig struct {
@@ -509,7 +503,7 @@ import (
     "context"
     "encoding/json"
     "github.com/go-redis/redis/v8"
-    "github.com/yourusername/transform-service/pkg/event"
+    "github.com/zlovtnik/ggt/pkg/event"
 )
 
 type RedisLookupConfig struct {
@@ -581,7 +575,7 @@ gopackage validate
 import (
     "context"
     "github.com/xeipuuv/gojsonschema"
-    "github.com/yourusername/transform-service/pkg/event"
+    "github.com/zlovtnik/ggt/pkg/event"
 )
 
 type SchemaConfig struct {
@@ -724,6 +718,8 @@ func NewLogger(level string) (*zap.Logger, error) {
 }
 
 // Logging helpers
+// IMPORTANT: Never log raw event payloads as they may contain PII/PHI/PCI data.
+// Only log metadata and use field-level masking for any event data that must be logged.
 func LogTransformStart(logger *zap.Logger, pipeline, transform string, evt event.Event) {
     logger.Debug("transform_start",
         zap.String("pipeline", pipeline),
@@ -734,6 +730,38 @@ func LogTransformStart(logger *zap.Logger, pipeline, transform string, evt event
     )
 }
 
+// Example of SAFE logging with field masking (for debugging only):
+func LogTransformResult(logger *zap.Logger, transform string, result event.Event, err error) {
+    if err != nil {
+        logger.Error("transform_failed",
+            zap.String("transform", transform),
+            zap.Error(err),
+            zap.String("topic", result.Metadata.Topic),
+            zap.Int64("offset", result.Metadata.Offset),
+        )
+        return
+    }
+    
+    // Only log non-sensitive metadata and counts
+    fieldCount := 0
+    if fields := result.GetFields(); fields != nil {
+        fieldCount = len(fields)
+    }
+    
+    logger.Debug("transform_success",
+        zap.String("transform", transform),
+        zap.String("topic", result.Metadata.Topic),
+        zap.Int64("offset", result.Metadata.Offset),
+        zap.Int("field_count", fieldCount),
+    )
+}
+
+// Example of UNSAFE logging (DO NOT USE):
+// func LogUnsafeExample(logger *zap.Logger, evt event.Event) {
+//     // DANGER: This exposes all event data including PII/PHI
+//     logger.Info("event_data", zap.Any("payload", evt.GetFields()))
+// }
+
 8. Testing Strategy
 8.1 Unit Tests (Pure Functions)
 gopackage field_test
@@ -742,8 +770,8 @@ import (
     "context"
     "testing"
     "github.com/stretchr/testify/assert"
-    "github.com/yourusername/transform-service/internal/transform/field"
-    "github.com/yourusername/transform-service/pkg/event"
+    "github.com/zlovtnik/ggt/internal/transform/field"
+    "github.com/zlovtnik/ggt/pkg/event"
 )
 
 func TestRenameTransform(t *testing.T) {
@@ -848,6 +876,9 @@ func TestRedisEnrichment(t *testing.T) {
 }
 
 9. Task List
+
+**Status Update**: Last updated: 2025-12-24. Phases 1-6 completed by Week 6; Phase 7 in progress with focus on production readiness and advanced monitoring.
+
 Phase 1: Project Setup & Core Infrastructure (Week 1)
 1.1 Project Initialization
 
@@ -1187,7 +1218,7 @@ Phase 10: Production Readiness (Week 9)
 10. Dependencies
 Core Dependencies
 go// go.mod
-module github.com/yourusername/transform-service
+module github.com/zlovtnik/ggt
 
 go 1.21
 
@@ -1303,6 +1334,22 @@ func (ec *EnrichmentCache) GetOrFetch(
     ec.cache.Add(key, val)
     return val, nil
 }
+
+11.3 Performance Monitoring & Tuning
+
+Tie optimization strategies to concrete observability guidance by referencing Prometheus metrics from Section 7:
+- **Latency Profiling**: Use `transform_duration_seconds` histogram to measure p99 transform execution times; validate batching improvements by comparing before/after p99 values
+- **Throughput Validation**: Monitor `transform_messages_processed_total` counter; alert if sustained throughput drops below 10,000 msgs/sec target
+- **Memory Optimization**: Track `go_memstats_heap_alloc_bytes` and `go_goroutines` gauges; alert when heap usage exceeds 80% of 512MB limit
+- **Error Correlation**: Watch `transform_errors_total` counter for regressions during optimization changes
+
+**Suggested Alerting Thresholds**:
+- p99 `transform_duration_seconds` > 100ms (latency regression)
+- Sustained throughput < 8,000 msgs/sec (performance degradation)
+- Memory usage > 409MB (80% of 512MB limit)
+- Goroutine count > 1000 (potential goroutine leaks)
+
+**Recommended Dashboards**: Create Grafana panels for real-time metrics visualization; include runbook pointers for diagnosing regressions (e.g., "Check consumer lag, review recent config changes").
 
 12. Security Considerations
 
@@ -1584,9 +1631,9 @@ groups:
 **Split Transforms** (100% complete):
 - ✅ `split.array`: Expand array elements into separate events (one → many)
 
-**Aggregation Transforms** (80% complete):
+**Aggregation Transforms** (100% complete):
 - ✅ `aggregate.count`: Emit aggregation results after N events
-- 🔄 `aggregate.window`: Tumbling/sliding/session windows with time-based emission
+- ✅ `aggregate.window`: Tumbling/sliding/session windows with time-based emission
 
 #### Infrastructure & Observability
 - ✅ **Kafka Integration**: Consumer/producer with franz-go client, offset management
@@ -1625,17 +1672,17 @@ groups:
 ### Phase 7: Production Readiness (Current Phase)
 
 #### Immediate Priorities (Next 2-4 weeks)
-1. **Transform Implementation** (✅ Core complete, 🔄 Advanced in progress)
+1. **Transform Implementation** (✅ All core transforms complete)
    - ✅ Basic Transforms: `filter.route`, `data.case`, `validate.schema` (completed)
    - ✅ `split.array`: Expand array fields into multiple events (1→N transformation)
-   - 🔄 `aggregate.count`: Count-based windowing (N→1 transformation)
-   - 🔄 `aggregate.window`: Time/size-based windows with aggregation functions
+   - ✅ `aggregate.count`: Count-based windowing (N→1 transformation)
+   - ✅ `aggregate.window`: Time/size-based windows with aggregation functions
 
 2. **Performance Optimization**
    - Profile memory usage and optimize allocations
    - Tune circuit breaker parameters for production workloads
    - Implement connection pooling optimizations
-   - Benchmark split/aggregate performance at scale
+   - ✅ Benchmark split/aggregate performance at scale (See [BENCHMARK_REPORT.md](BENCHMARK_REPORT.md) - All transforms benchmarked: split.array, aggregate.count, aggregate.window)
 
 3. **Configuration Enhancements**
    - Add configuration validation for transform pipelines

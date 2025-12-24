@@ -20,8 +20,15 @@ type Transform interface {
 	Configure(cfg json.RawMessage) error
 	// Execute performs the transform. It receives a context and an event.
 	// It returns the transformed event(s) or an error.
-	// A returned ErrDrop indicates the event should be filtered/dropped.
-	// Returns can be: event.Event (single), []event.Event (multiple), or nil (dropped).
+	//
+	// Return value semantics:
+	// - (event, nil): Transform successful, event processed
+	// - ([]event.Event, nil): Transform successful, multiple events produced
+	// - (nil, nil): Event dropped silently (no error, no output)
+	// - (nil, ErrDrop): Event explicitly filtered/dropped (sentinel for filtering)
+	// - (nil, err): Error occurred during transform (err != ErrDrop)
+	//
+	// Guideline: Prefer (nil, nil) for silent drops to maintain consistent usage across the codebase.
 	Execute(ctx context.Context, e interface{}) (interface{}, error)
 }
 
@@ -51,6 +58,17 @@ func NewFunc(name string, fn func(ctx context.Context, e interface{}) (interface
 // TransformT is a generic transform interface that provides compile-time
 // typing for transform payloads. This is provided alongside the legacy
 // non-generic `Transform` interface to allow incremental migration.
+//
+// Key semantic difference: Because TransformT returns a typed T (not interface{}),
+// it cannot drop events by returning nil and must use ErrDrop to indicate dropped
+// events. In contrast, the legacy Transform interface can drop events by returning
+// nil (either silently with nil error, or explicitly with ErrDrop). This trade-off
+// provides compile-time type safety at the cost of slightly different error handling
+// semantics when choosing TransformT over the legacy interface.
+//
+// Note: This interface only supports returning single values of type T.
+// For transforms that need to return multiple events or handle complex
+// output types, use the legacy Transform interface directly.
 type TransformT[T any] interface {
 	Name() string
 	Configure(cfg json.RawMessage) error

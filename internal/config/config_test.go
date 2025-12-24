@@ -106,7 +106,7 @@ func TestApplyEnvOverridesErrors(t *testing.T) {
 func baseConfig() Config {
 	return Config{
 		Service: ServiceConfig{
-			Name:            "transform-service",
+			Name:            "ggt",
 			LogLevel:        "info",
 			MetricsPort:     9090,
 			HealthPort:      8080,
@@ -115,7 +115,7 @@ func baseConfig() Config {
 		Kafka: KafkaConfig{
 			Consumer: ConsumerConfig{
 				Brokers:         []string{"localhost:9092"},
-				GroupID:         "transform-service",
+				GroupID:         "ggt",
 				Topics:          []string{"raw.events"},
 				SessionTimeout:  "45s",
 				MaxPollInterval: "5m",

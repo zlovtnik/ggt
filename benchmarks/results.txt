@@ -1,0 +1,53 @@
+========================
+Benchmark Results - Wed Dec 24 10:37:12 EST 2025
+========================
+
+
+## split.array Benchmarks
+
+goos: darwin
+goarch: arm64
+pkg: github.com/zlovtnik/ggt/internal/transform/split
+cpu: Apple M4 Pro
+BenchmarkSplitArraySmall-14               	   28828	     41661 ns/op	  122584 B/op	     793 allocs/op
+BenchmarkSplitArrayMedium-14              	     306	   3858811 ns/op	10786652 B/op	   61903 allocs/op
+BenchmarkSplitArrayLarge-14               	       2	 572316625 ns/op	1058864520 B/op	 6019234 allocs/op
+BenchmarkSplitArrayNestedPayload-14       	     148	   8024854 ns/op	21103600 B/op	  123305 allocs/op
+BenchmarkSplitArrayStringElements-14      	    8451	    140690 ns/op	  672971 B/op	    1703 allocs/op
+BenchmarkSplitArrayMemoryAllocation-14    	       3	 493215875 ns/op	1058862824 B/op	 6019216 allocs/op
+BenchmarkSplitArrayParallel-14            	     366	   3269163 ns/op	11020858 B/op	   63250 allocs/op
+PASS
+ok  	github.com/zlovtnik/ggt/internal/transform/split	15.623s
+
+
+## aggregate.count Benchmarks
+
+goos: darwin
+goarch: arm64
+pkg: github.com/zlovtnik/ggt/internal/transform/aggregate
+cpu: Apple M4 Pro
+BenchmarkAggregateCountSmallWindow-14             	  404205	      2859 ns/op	    3770 B/op	      83 allocs/op
+BenchmarkAggregateCountMediumWindow-14            	   44698	     24812 ns/op	   15049 B/op	     844 allocs/op
+BenchmarkAggregateCountLargeWindow-14             	    5280	    221564 ns/op	  115935 B/op	    8045 allocs/op
+BenchmarkAggregateCountMultipleKeys-14            	   14570	     82488 ns/op	   52109 B/op	    2266 allocs/op
+BenchmarkAggregateCountSingleAggregation-14       	  107013	     11050 ns/op	    6276 B/op	     324 allocs/op
+BenchmarkAggregateCountMultipleAggregations-14    	   67191	     17832 ns/op	   12448 B/op	     557 allocs/op
+BenchmarkAggregateCountMemoryAllocation-14        	 3183337	       382.6 ns/op	     760 B/op	      12 allocs/op
+BenchmarkAggregateCountParallel-14                	 3288603	       349.1 ns/op	     919 B/op	      14 allocs/op
+PASS
+ok  	github.com/zlovtnik/ggt/internal/transform/aggregate	13.610s
+
+
+## aggregate.window Benchmarks
+
+goos: darwin
+goarch: arm64
+pkg: github.com/zlovtnik/ggt/internal/transform/aggregate
+cpu: Apple M4 Pro
+BenchmarkAggregateWindowTumblingSmall-14          	  107830	     12111 ns/op	   16445 B/op	     191 allocs/op
+BenchmarkAggregateWindowTumblingMedium-14         	   19278	     57299 ns/op	  123595 B/op	    1364 allocs/op
+BenchmarkAggregateWindowTumblingLarge-14          	    2490	    506090 ns/op	 1113215 B/op	   13068 allocs/op
+BenchmarkAggregateWindowDurationBased-14          	   37207	     32203 ns/op	   61956 B/op	     694 allocs/op
+BenchmarkAggregateWindowHybridEventDuration-14    	   34017	     35362 ns/op	   65235 B/op	     774 allocs/op
+BenchmarkAggregateWindowMultiplePartitions-14     	   18496	     68694 ns/op	  130772 B/op	    1576 allocs/op
+BenchmarkAggregateWindowSingleAggregation-14      	

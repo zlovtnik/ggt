@@ -14,7 +14,7 @@ import (
 const (
 	DefaultConfigPath       = "configs/config.yaml"
 	ConfigPathEnvKey        = "TRANSFORM_CONFIG_PATH"
-	defaultServiceName      = "transform-service"
+	defaultServiceName      = "ggt"
 	defaultLogLevel         = "info"
 	defaultShutdownDuration = 30 * time.Second
 	defaultMetricsNamespace = "transform_service"

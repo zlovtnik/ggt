@@ -197,9 +197,10 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 		return nil, err
 	}
 	w.cons = cons
+	var consForDefer = cons
 	defer func() {
-		if w.cons != nil {
-			w.cons.Stop(context.Background())
+		if consForDefer != nil {
+			consForDefer.Stop(context.Background())
 		}
 	}()
 
@@ -214,9 +215,10 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 		return nil, err
 	}
 	w.prod = prod
+	var prodForDefer = prod
 	defer func() {
-		if w.prod != nil {
-			w.prod.Close()
+		if prodForDefer != nil {
+			prodForDefer.Close()
 		}
 	}()
 
@@ -252,11 +254,18 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 			}
 			logger.Error("pipeline error", zap.Error(err))
 			// Send to DLQ
+			// Send to DLQ if configured
 			dlqTopic := info.cfg.DLQTopic
 			if dlqTopic != "" {
-				dlqValue, _ := json.Marshal(result.(event.Event).Payload)
-				if sendErr := w.prod.Send(hctx, dlqTopic, r.Key, dlqValue); sendErr != nil {
-					logger.Error("failed to send to DLQ", zap.Error(sendErr))
+				if evt, ok := result.(event.Event); ok {
+					dlqValue, marshalErr := json.Marshal(evt.Payload)
+					if marshalErr != nil {
+						logger.Error("failed to marshal DLQ payload", zap.Error(marshalErr))
+					} else if sendErr := w.prod.Send(hctx, dlqTopic, r.Key, dlqValue); sendErr != nil {
+						logger.Error("failed to send to DLQ", zap.Error(sendErr))
+					}
+				} else {
+					logger.Error("cannot send to DLQ: result is not an event", zap.String("type", fmt.Sprintf("%T", result)))
 				}
 			}
 			return err
@@ -268,7 +277,11 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 		switch result := result.(type) {
 		case event.Event:
 			// Single event output
-			outputValue, _ := json.Marshal(result.Payload)
+			outputValue, err := json.Marshal(result.Payload)
+			if err != nil {
+				logger.Error("failed to marshal output payload", zap.Error(err), zap.Any("payload", result.Payload))
+				return err
+			}
 			if err := w.prod.Send(hctx, outputTopic, r.Key, outputValue); err != nil {
 				logger.Error("failed to send to output", zap.Error(err))
 				return err
@@ -276,7 +289,11 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 		case []event.Event:
 			// Multiple event output - send each to the output topic
 			for i, evt := range result {
-				outputValue, _ := json.Marshal(evt.Payload)
+				outputValue, err := json.Marshal(evt.Payload)
+				if err != nil {
+					logger.Error("failed to marshal output payload", zap.Error(err), zap.Int("index", i), zap.Any("payload", evt.Payload))
+					return err
+				}
 				// For multiple messages, we might want to modify the key to avoid duplicates
 				// For now, use the same key but this could be configurable
 				key := r.Key
@@ -307,8 +324,8 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 	}
 
 	// Cancel deferred cleanup since startup succeeded
-	w.cons = nil
-	w.prod = nil
+	consForDefer = nil
+	prodForDefer = nil
 
 	go func() {
 		logger.Info("pipeline worker started")

@@ -4,11 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/zlovtnik/ggt/internal/transform"
 	"github.com/zlovtnik/ggt/pkg/event"
 )
+
+// AggregateState holds running aggregate values for incremental computation
+type AggregateState struct {
+	Sum   float64
+	Count int
+	Min   *float64 // nil until first value
+	Max   *float64 // nil until first value
+}
+
+// CountWindowState holds the state for a count-based aggregation window
+type CountWindowState struct {
+	StartTime  time.Time
+	EventCount int                        // running count of events processed
+	Aggregates map[string]*AggregateState // per-aggregation running state
+}
 
 // CountConfig represents configuration for count-based aggregation
 type CountConfig struct {
@@ -20,7 +37,7 @@ type CountConfig struct {
 // CountTransform implements count-based aggregation
 type CountTransform struct {
 	config    CountConfig
-	windows   map[string]*WindowState // keyed by window key
+	windows   map[string]*CountWindowState // keyed by window key
 	windowMux sync.RWMutex
 }
 
@@ -44,7 +61,28 @@ func (c *CountTransform) Configure(raw json.RawMessage) error {
 		return fmt.Errorf("at least one aggregation is required")
 	}
 
-	c.windows = make(map[string]*WindowState)
+	// Validate aggregation functions
+	validFunctions := map[string]bool{
+		"sum":   true,
+		"count": true,
+		"avg":   true,
+		"min":   true,
+		"max":   true,
+	}
+	var invalidFunctions []string
+	for i, agg := range c.config.Aggregations {
+		normalizedFunc := strings.ToLower(agg.Function)
+		if !validFunctions[normalizedFunc] {
+			invalidFunctions = append(invalidFunctions, fmt.Sprintf("%q (%s)", agg.Function, agg.As))
+		}
+		// Normalize the function name to lowercase for consistent processing
+		c.config.Aggregations[i].Function = normalizedFunc
+	}
+	if len(invalidFunctions) > 0 {
+		return fmt.Errorf("invalid aggregation function(s): %s; valid functions are: sum, count, avg, min, max", strings.Join(invalidFunctions, ", "))
+	}
+
+	c.windows = make(map[string]*CountWindowState)
 	return nil
 }
 
@@ -62,112 +100,139 @@ func (c *CountTransform) Execute(ctx context.Context, e interface{}) (interface{
 	}
 	windowKey := fmt.Sprintf("%v", keyValue)
 
+	// Acquire write lock for the entire operation to prevent race conditions
 	c.windowMux.Lock()
 	defer c.windowMux.Unlock()
 
 	// Get or create window state
 	state, exists := c.windows[windowKey]
 	if !exists {
-		state = &WindowState{
+		state = &CountWindowState{
 			StartTime:  ev.Timestamp,
-			Events:     make([]event.Event, 0),
-			Aggregates: make(map[string]interface{}),
+			EventCount: 0,
+			Aggregates: make(map[string]*AggregateState),
+		}
+		// Initialize aggregate states
+		for _, agg := range c.config.Aggregations {
+			state.Aggregates[agg.As] = &AggregateState{}
 		}
 		c.windows[windowKey] = state
 	}
 
-	// Add event to window
-	state.Events = append(state.Events, ev)
+	// Check if we need to emit after this event
+	shouldEmit := state.EventCount+1 >= c.config.Count
 
-	// Update aggregations
-	if err := c.updateAggregations(state); err != nil {
-		return nil, fmt.Errorf("failed to update aggregations: %w", err)
+	// Increment event count and update aggregations
+	state.EventCount++
+	c.updateAggregationsIncremental(state, ev)
+
+	// If not emitting, we're done
+	if !shouldEmit {
+		return nil, nil
 	}
 
-	// Check if we should emit results
-	if len(state.Events) >= c.config.Count {
-		// Create result event
-		resultEvent := event.Event{
-			Payload:   make(map[string]interface{}),
-			Timestamp: ev.Timestamp,
-		}
+	// We need to emit - create result event
+	resultEvent := event.Event{
+		Payload:   make(map[string]interface{}),
+		Timestamp: ev.Timestamp,
+	}
 
-		// Add window metadata
-		resultEvent = resultEvent.SetField("window_key", windowKey)
-		resultEvent = resultEvent.SetField("window_start", state.StartTime)
-		resultEvent = resultEvent.SetField("event_count", len(state.Events))
+	// Add window metadata
+	resultEvent = resultEvent.SetField("window_key", windowKey)
+	resultEvent = resultEvent.SetField("window_start", state.StartTime)
+	resultEvent = resultEvent.SetField("event_count", state.EventCount)
 
-		// Add aggregations
-		for _, agg := range c.config.Aggregations {
-			if value, exists := state.Aggregates[agg.As]; exists {
+	// Add aggregations
+	for _, agg := range c.config.Aggregations {
+		if aggState, exists := state.Aggregates[agg.As]; exists {
+			var value interface{}
+			switch agg.Function {
+			case "sum":
+				value = aggState.Sum
+			case "count":
+				value = aggState.Count
+			case "avg":
+				if aggState.Count > 0 {
+					value = aggState.Sum / float64(aggState.Count)
+				} else {
+					value = 0.0
+				}
+			case "min":
+				if aggState.Min != nil {
+					value = *aggState.Min
+				} else {
+					value = nil
+				}
+			case "max":
+				if aggState.Max != nil {
+					value = *aggState.Max
+				} else {
+					value = nil
+				}
+			}
+			if value != nil {
 				resultEvent = resultEvent.SetField(agg.As, value)
 			}
 		}
-
-		// Clean up window state - start fresh for next window
-		delete(c.windows, windowKey)
-
-		// Return the aggregated result
-		return resultEvent, nil
 	}
 
-	// Not enough events yet, drop this event
-	return nil, transform.ErrDrop
+	// Clean up window state
+	delete(c.windows, windowKey)
+
+	return resultEvent, nil
 }
 
-// updateAggregations updates the aggregate values for a window
-func (c *CountTransform) updateAggregations(state *WindowState) error {
+// updateAggregationsIncremental updates running aggregate state for a single event
+func (c *CountTransform) updateAggregationsIncremental(state *CountWindowState, ev event.Event) error {
 	for _, agg := range c.config.Aggregations {
-		values := make([]float64, 0, len(state.Events))
-
-		// Extract numeric values from the specified field
-		for _, ev := range state.Events {
-			if val, exists := ev.GetField(agg.Field); exists {
-				if num, ok := val.(float64); ok {
-					values = append(values, num)
-				} else if num, ok := val.(int); ok {
-					values = append(values, float64(num))
-				}
-			}
+		// Get the field value
+		fieldValue, exists := ev.GetField(agg.Field)
+		if !exists {
+			continue // Skip if field doesn't exist
 		}
 
-		if len(values) == 0 {
+		// Convert to float64 for aggregation
+		var numericValue float64
+		switch v := fieldValue.(type) {
+		case int:
+			numericValue = float64(v)
+		case int32:
+			numericValue = float64(v)
+		case int64:
+			numericValue = float64(v)
+		case float32:
+			numericValue = float64(v)
+		case float64:
+			numericValue = v
+		default:
+			// Skip non-numeric values
 			continue
 		}
 
+		// Get or create aggregate state
+		aggState, exists := state.Aggregates[agg.As]
+		if !exists {
+			aggState = &AggregateState{}
+			state.Aggregates[agg.As] = aggState
+		}
+
+		// Update running aggregates
 		switch agg.Function {
-		case "sum":
-			sum := 0.0
-			for _, v := range values {
-				sum += v
-			}
-			state.Aggregates[agg.As] = sum
+		case "sum", "avg":
+			aggState.Sum += numericValue
+			aggState.Count++
 		case "count":
-			state.Aggregates[agg.As] = len(values)
-		case "avg":
-			sum := 0.0
-			for _, v := range values {
-				sum += v
-			}
-			state.Aggregates[agg.As] = sum / float64(len(values))
+			aggState.Count++
 		case "min":
-			min := values[0]
-			for _, v := range values[1:] {
-				if v < min {
-					min = v
-				}
+			if aggState.Min == nil || numericValue < *aggState.Min {
+				minVal := numericValue
+				aggState.Min = &minVal
 			}
-			state.Aggregates[agg.As] = min
 		case "max":
-			max := values[0]
-			for _, v := range values[1:] {
-				if v > max {
-					max = v
-				}
+			if aggState.Max == nil || numericValue > *aggState.Max {
+				maxVal := numericValue
+				aggState.Max = &maxVal
 			}
-			state.Aggregates[agg.As] = max
-		default:
-			return fmt.Errorf("unknown aggregation function: %s", agg.Function)
 		}
 	}
 	return nil
