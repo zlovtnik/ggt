@@ -62,6 +62,8 @@ type Client struct {
 	connMaxLifetime time.Duration
 	maxOpenConns    int
 	maxIdleConns    int
+	queryTimeout    time.Duration
+	retryCfg        *enrichment.RetryConfig
 }
 
 // ClientConfig holds Postgres client configuration.
@@ -72,6 +74,11 @@ type ClientConfig struct {
 	ConnMaxLifetime time.Duration
 	CacheTTL        time.Duration
 	CacheSize       int
+	// QueryTimeout is the default timeout applied to individual queries
+	// when a context without deadline is provided. Zero means no timeout.
+	QueryTimeout time.Duration
+	// RetryCount controls how many attempts are made for transient errors.
+	RetryCount int
 }
 
 // DefaultClientConfig returns sensible Postgres client defaults.
@@ -82,6 +89,8 @@ func DefaultClientConfig() *ClientConfig {
 		ConnMaxLifetime: 5 * time.Minute,
 		CacheTTL:        10 * time.Minute,
 		CacheSize:       1000,
+		QueryTimeout:    5 * time.Second,
+		RetryCount:      3,
 	}
 }
 
@@ -144,6 +153,8 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 		connMaxLifetime: cfg.ConnMaxLifetime,
 		maxOpenConns:    cfg.MaxOpenConns,
 		maxIdleConns:    cfg.MaxIdleConns,
+		queryTimeout:    cfg.QueryTimeout,
+		retryCfg:        &enrichment.RetryConfig{MaxRetries: cfg.RetryCount, InitialBackoff: 100 * time.Millisecond, MaxBackoff: 2 * time.Second, BackoffMultiplier: 2.0},
 	}, nil
 }
 
@@ -188,6 +199,19 @@ func (c *Client) PreparedStmt(ctx context.Context, query string) (*sql.Stmt, err
 	elem := c.stmtLRU.PushFront(query)
 	c.stmtElements[query] = elem
 	return stmt, nil
+}
+
+// ensureCtx returns a context with the client's QueryTimeout applied if the
+// provided context does not already have a deadline. If a new context is
+// created, a cancel function is returned which must be called by the caller.
+func (c *Client) ensureCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if c == nil || c.queryTimeout == 0 {
+		return ctx, nil
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, nil
+	}
+	return context.WithTimeout(ctx, c.queryTimeout)
 }
 
 // evictLRU removes the least recently used statement from cache
@@ -253,9 +277,22 @@ func (c *Client) Query(ctx context.Context, query string, args ...interface{}) (
 		return nil, err
 	}
 
-	rows, err := stmt.QueryContext(ctx, args...)
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+
+	var rows *sql.Rows
+	err = enrichment.Do(ctx2, c.retryCfg, func() error {
+		var errInner error
+		rows, errInner = stmt.QueryContext(ctx2, args...)
+		if errInner != nil {
+			c.removeInvalidStmt(query, errInner)
+			return errInner
+		}
+		return nil
+	})
 	if err != nil {
-		c.removeInvalidStmt(query, err)
 		return nil, err
 	}
 	return rows, nil
@@ -268,7 +305,64 @@ func (c *Client) Exec(ctx context.Context, query string, args ...interface{}) (s
 		return nil, err
 	}
 
-	result, err := stmt.ExecContext(ctx, args...)
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+
+	// Use predicate-aware retry: retry only for transient errors (connection/timeouts).
+	var result sql.Result
+	shouldRetry := func(err error) bool {
+		if err == nil {
+			return false
+		}
+		// Do not retry on context cancellation/deadline here; enrichment.DoWithPredicate will handle that.
+		// Inspect pq errors and treat constraint/syntax/permission errors as non-retriable.
+		if pqErr, ok := err.(*pq.Error); ok {
+			switch string(pqErr.Code) {
+			case "23505": // unique_violation
+				return false
+			case "23503": // foreign_key_violation
+				return false
+			case "42601": // syntax_error
+				return false
+			case "40001": // serialization_failure / transaction aborted
+				return false
+			default:
+				// unknown pq error: be conservative and do not retry
+				return false
+			}
+		}
+		// For generic errors (network/timeouts), allow retry.
+		return true
+	}
+
+	err = enrichment.DoWithPredicate(ctx2, c.retryCfg, func() error {
+		var errInner error
+		result, errInner = stmt.ExecContext(ctx2, args...)
+		if errInner != nil {
+			c.removeInvalidStmt(query, errInner)
+			return errInner
+		}
+		return nil
+	}, shouldRetry)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ExecNoRetry executes the statement once and returns the result without any retries.
+func (c *Client) ExecNoRetry(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+	stmt, err := c.PreparedStmt(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+	result, err := stmt.ExecContext(ctx2, args...)
 	if err != nil {
 		c.removeInvalidStmt(query, err)
 		return nil, err

@@ -134,6 +134,161 @@ transforms:
                       - email
                     mask_type: full
 
+    - name: all_transforms_demo
+      input_topics:
+        - raw.all
+      output_topic: processed.all
+      dlq_topic: dlq.all
+      transforms:
+        - type: field.add
+          config:
+            fields:
+              processed_at: "{{now}}"
+
+        - type: field.rename
+          config:
+            mappings:
+              old_id: id
+
+        - type: field.extract
+          config:
+            source: nested.email
+            target: email_local
+
+        - type: field.flatten
+          config: {}
+
+        - type: field.unflatten
+          config: {}
+
+        - type: field.remove
+          config:
+            fields:
+              - temp
+              - debug
+
+        - type: data.case
+          config:
+            field: name
+            case: title
+
+        - type: data.convert
+          config:
+            fields:
+              - name: total_amount
+                from: string
+                to: float
+
+        - type: data.format
+          config:
+            field: display_name
+            format: "%s - %s"
+            args:
+              - first_name
+              - last_name
+
+        - type: data.encode
+          config:
+            source_field: notes
+            operation: encode
+            format: base64
+
+        - type: data.hash
+          config:
+            source_field: password
+            algorithm: sha256
+
+        - type: data.join
+          config:
+            source_field: tags
+            separator: ","
+
+        - type: data.split
+          config:
+            field: csv_field
+            separator: ","
+
+        - type: data.regex
+          config:
+            source_field: raw_text
+            pattern: "(?i)password=([\w-]+)"
+        - type: data.mask
+          config:
+            fields:
+              - email
+            mask_type: partial
+            preserve_length: false
+            keep_prefix: 3
+            mask_char: "*"
+
+        - type: split.array
+          config:
+            field: items
+            key: item
+
+        - type: split.regex
+          config:
+            field: tags_str
+            pattern: "\\w+"
+            key: tag
+
+        - type: filter.condition
+          config:
+            condition: "payload.total_amount > 1000"
+
+        - type: filter.split
+          config:
+            field: line_items
+            target: line_item
+            drop_empty: false
+
+        - type: filter.route
+          config:
+            conditions:
+              - condition: "payload.type == 'audit'"
+                topic: audits
+              - condition: "payload.priority == 'high'"
+                topic: alerts
+            default: processed.all
+
+        - type: validate.required
+          config:
+            fields:
+              - id
+              - total_amount
+            on_error: dlq
+
+        - type: validate.rules
+          config:
+            rules:
+              amount_positive: "payload.total_amount > 0"
+              has_id: "payload.id != nil"
+            on_error: dlq
+
+        - type: validate.schema
+          config:
+            schema_file: schemas/all.json
+            on_error: dlq
+
+        - type: aggregate.count
+          config:
+            key_field: id
+            count: 10
+            aggregations:
+              - field: total_amount
+                function: sum
+                as: total_sum
+
+        - type: aggregate.window
+          config:
+            key_field: id
+            max_events: 5
+            max_duration: 1m
+            aggregations:
+              - field: total_amount
+                function: avg
+                as: avg_amount
+
 enrichment:
   redis:
     default:
@@ -141,6 +296,11 @@ enrichment:
       password: ""
       db: 0
       max_retries: 3
+      # Operation timeout applied to individual Redis operations when no context deadline is present.
+      # Example: 5s
+      operation_timeout: 5s
+      # RetryCount controls how many attempts are made for transient Redis errors.
+      retry_count: 3
       pool_size: 10
   http:
     default_timeout: 1s
@@ -155,6 +315,8 @@ enrichment:
     max_idle_conns: 5
     conn_max_lifetime: 1h
     query_timeout: 10s
+    # RetryCount controls how many attempts are made for transient Postgres errors.
+    retry_count: 3
 
 metrics:
   namespace: transform_service

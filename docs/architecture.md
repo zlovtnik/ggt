@@ -16,5 +16,14 @@ Horizontal scaling happens at the consumer level: each instance joins the Kafka 
 ## Error Handling and Failure Modes
 Pipeline stages declare their DLQ topics, retries, and filtering behavior in the same sample configuration, which keeps Kafka errors predictable. Expect retries to follow the Kafka client backoff settings, long-running transforms to signal backpressure via bounded queues, and the main goroutine to trigger graceful shutdown through the same context that the metrics/health servers share.
 
+## Enrichment Backends
+Enrichment backends (HTTP, Redis, Postgres) are used for lookups and must be configured for reliability. Per-operation timeouts and retry counts can be tuned in the sample config (`configs/config.example.yaml`).
+
+- **Redis**: `operation_timeout` sets a default timeout applied to individual Redis operations when the caller's context has no deadline. `retry_count` controls how many attempts are made for transient Redis errors. Both defaults are safe for typical deployments (e.g., `operation_timeout: 5s`, `retry_count: 3`).
+
+- **Postgres**: `query_timeout` sets a default per-query timeout used when no context deadline is present. `retry_count` controls transient retry attempts for query/exec failures.
+
+The service applies exponential backoff between retry attempts; retries are skipped if the context is cancelled or its deadline is exceeded.
+
 ## Shared Package Dependencies
 [internal/logging/logger.go](internal/logging/logger.go) and [internal/metrics/metrics.go](internal/metrics/metrics.go) meaningfully instrument every component with consistent structured logs and Prometheus counters that `cmd/transform/main.go` wires into the ready-and-alive probes.

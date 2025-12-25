@@ -183,6 +183,7 @@ func RegisterPostgresEnrichment(cfg *config.EnrichmentConfig) error {
 		ConnMaxLifetime: cfg.Postgres.ConnMaxLifetime,
 		CacheTTL:        10 * time.Minute,
 		CacheSize:       1000,
+		RetryCount:      cfg.Postgres.RetryCount,
 	}
 
 	client, err := NewClient(pgCfg)

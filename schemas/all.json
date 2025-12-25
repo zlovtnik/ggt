@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "all_transforms_demo schema",
+  "type": "object",
+  "x-data-protection": {
+    "runbook": "docs/data-protection.md",
+    "default_retention_days": 365,
+    "compliance": ["GDPR", "CCPA"],
+    "owner": "data-protection-team@example.com",
+    "note": "Fields marked with x-data-protection require operational safeguards: encryption-at-rest, TLS for transit, access controls, logging, periodic access reviews, and documented erasure procedures. See runbook for details."
+  },
+  "properties": {
+    "id": { "type": "string" },
+    "total_amount": { "type": "number" },
+    "name": {
+      "type": "string",
+      "maxLength": 200,
+      "x-data-protection": {
+        "pii": true,
+        "safeguards": ["access_control", "encryption_at_rest", "encryption_in_transit", "logging"],
+        "processing_purpose": "display and user-facing reporting",
+        "retention_days": 365
+      }
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "maxLength": 254,
+      "x-data-protection": {
+        "pii": true,
+        "safeguards": ["access_control", "encryption_at_rest", "encryption_in_transit", "logging"],
+        "validation": { "pattern": "^\\\S+@\\\S+\\.\\\S+$" },
+        "processing_purpose": "contact & notifications",
+        "retention_days": 365
+      }
+    },
+    "password": {
+      "type": "string",
+      "writeOnly": true,
+      "description": "Password must never be stored in plaintext. Store only hashed values (bcrypt/argon2). Service must accept hashed values only or hash before storage.",
+      "x-data-protection": {
+        "pii": false,
+        "safeguards": ["hash_only", "no_plaintext_storage", "access_control", "encryption_at_rest"],
+        "notes": "Enforce hashing (bcrypt/argon2) with a secure salt; do not log raw values; mark as write-only in APIs."
+      }
+    },
+    "items": { "type": "array" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "csv_field": { "type": "string" },
+    "raw_text": { "type": "string" },
+    "processed_at": { "type": "string", "format": "date-time" }
+  },
+  "required": ["id", "total_amount"],
+  "additionalProperties": true
+}
