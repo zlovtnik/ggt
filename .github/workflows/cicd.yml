@@ -22,7 +22,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.23'
+        go-version: '1.24'
         cache: true
 
     - name: Download dependencies
@@ -44,7 +44,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.23'
+        go-version: '1.24'
         cache: true
 
     - name: Build binary
@@ -81,7 +81,8 @@ jobs:
         tags: |
           type=ref,event=branch
           type=ref,event=pr
-          type=sha,prefix={{branch}}-
+          type=sha,prefix={{branch}}-,event=branch
+          type=sha,prefix=pr-,event=pr
           type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push Docker image

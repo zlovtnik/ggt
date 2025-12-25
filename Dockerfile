@@ -21,7 +21,7 @@ COPY . .
 RUN mkdir -p /app/configs
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ggt ./cmd/transform
+RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-w -s" -o ggt ./cmd/transform
 
 # Runtime stage
 FROM alpine:3.18
