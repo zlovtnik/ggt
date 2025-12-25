@@ -1,6 +1,11 @@
 # Makefile for Transform Service
 
-.PHONY: all build test clean fmt vet tidy run coverage bench bench-split bench-aggregate bench-profile deploy help
+.PHONY: all build test clean fmt vet tidy run coverage bench bench-split bench-aggregate bench-profile docker-build docker-run docker-push k8s-deploy k8s-undeploy helm-install helm-upgrade helm-uninstall deploy help
+
+# Docker configuration
+IMAGE_NAME := ggt
+IMAGE_TAG := latest
+REGISTRY := ghcr.io/zlovtnik
 
 # Default target
 all: build
@@ -60,6 +65,33 @@ bench-profile:
 deploy:
 	./scripts/deploy.sh
 
+# Docker targets
+docker-build:
+	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+
+docker-run: docker-build
+	docker run --rm -p 9095:9095 -p 8085:8085 $(IMAGE_NAME):$(IMAGE_TAG)
+
+docker-push: docker-build
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+	docker push $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+# Kubernetes targets
+k8s-deploy:
+	kubectl apply -f k8s/
+
+k8s-undeploy:
+	kubectl delete -f k8s/
+
+# Helm targets
+helm-install:
+	helm install ggt ./helm/ggt
+
+helm-upgrade:
+	helm upgrade ggt ./helm/ggt
+
+helm-uninstall:
+	helm uninstall ggt
+
 # Show help
 help:
 	@echo "Available targets:"
@@ -76,5 +108,13 @@ help:
 	@echo "  vet            - Vet code"
 	@echo "  tidy           - Tidy dependencies"
 	@echo "  run            - Run the service"
+	@echo "  docker-build   - Build Docker image"
+	@echo "  docker-run     - Run Docker container"
+	@echo "  docker-push    - Push Docker image to registry"
+	@echo "  k8s-deploy     - Deploy to Kubernetes"
+	@echo "  k8s-undeploy   - Remove from Kubernetes"
+	@echo "  helm-install   - Install Helm chart"
+	@echo "  helm-upgrade   - Upgrade Helm chart"
+	@echo "  helm-uninstall - Uninstall Helm chart"
 	@echo "  deploy         - Deploy (placeholder)"
 	@echo "  help           - Show this help"

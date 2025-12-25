@@ -76,3 +76,28 @@ func TestFilterSplitTransformNonArray(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, out)
 }
+
+func TestFilterSplitTransformComplexTypes(t *testing.T) {
+	cfg := `{"field":"items"}`
+	trans := NewSplitTransform()
+	require.NoError(t, trans.Configure(json.RawMessage(cfg)))
+
+	complexItems := []interface{}{
+		map[string]interface{}{"id": 1, "name": "item1"},
+		map[string]interface{}{"id": 2, "name": "item2"},
+	}
+	ev := event.Event{Payload: map[string]interface{}{"items": complexItems}, Headers: map[string]string{}}
+
+	out, err := trans.Execute(context.Background(), ev)
+	require.NoError(t, err)
+	require.NotNil(t, out)
+
+	results, ok := out.([]event.Event)
+	require.True(t, ok)
+	require.Len(t, results, 2)
+
+	assert.Equal(t, map[string]interface{}{"items": map[string]interface{}{"id": 1, "name": "item1"}}, results[0].Payload)
+	assert.Equal(t, map[string]interface{}{"items": map[string]interface{}{"id": 2, "name": "item2"}}, results[1].Payload)
+	assert.Equal(t, "0", results[0].Headers["_split_index"])
+	assert.Equal(t, "1", results[1].Headers["_split_index"])
+}

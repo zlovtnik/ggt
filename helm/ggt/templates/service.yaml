@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ggt.fullname" . }}
+  labels:
+    {{- include "ggt.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+  - name: metrics
+    port: {{ .Values.service.ports.metrics }}
+    targetPort: {{ .Values.config.metrics.port }}
+    protocol: TCP
+  - name: health
+    port: {{ .Values.service.ports.health }}
+    targetPort: {{ .Values.config.health.port }}
+    protocol: TCP
+  selector:
+    {{- include "ggt.selectorLabels" . | nindent 4 }}

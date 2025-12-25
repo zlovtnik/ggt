@@ -1,0 +1,16 @@
+apiVersion: v2
+name: ggt
+description: A Helm chart for ggt Kafka transform service
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - kafka
+  - transform
+  - streaming
+home: https://github.com/zlovtnik/ggt
+sources:
+  - https://github.com/zlovtnik/ggt
+maintainers:
+  - name: zlovtnik
+    email: your-actual-email@domain.com

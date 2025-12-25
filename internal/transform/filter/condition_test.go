@@ -403,31 +403,65 @@ func TestConditionParser(t *testing.T) {
 	}
 }
 
-func TestConditionParserIgnoresOperatorsInQuotedValues(t *testing.T) {
-	cond, err := condition.Parse(`message contains "a == b"`)
-	require.NoError(t, err)
+func TestConditionParserQuotedValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     string
+		event    event.Event
+		expected bool
+	}{
+		{
+			name: "ignores operators in quoted values",
+			expr: `message contains "a == b"`,
+			event: event.Event{
+				Payload: map[string]interface{}{"message": "value a == b here"},
+			},
+			expected: true,
+		},
+		{
+			name: "in operator with escaped quotes",
+			expr: `value in "\"a\" , 'b', c"`,
+			event: event.Event{
+				Payload: map[string]interface{}{"value": "a"},
+			},
+			expected: true,
+		},
+		{
+			name: "in operator with single quotes",
+			expr: `value in "\"a\" , 'b', c"`,
+			event: event.Event{
+				Payload: map[string]interface{}{"value": "b"},
+			},
+			expected: true,
+		},
+		{
+			name: "in operator with unquoted value",
+			expr: `value in "\"a\" , 'b', c"`,
+			event: event.Event{
+				Payload: map[string]interface{}{"value": "c"},
+			},
+			expected: true,
+		},
+		{
+			name: "in operator with value not in list",
+			expr: `value in "\"a\" , 'b', c"`,
+			event: event.Event{
+				Payload: map[string]interface{}{"value": "d"},
+			},
+			expected: false,
+		},
+	}
 
-	ev := event.Event{Payload: map[string]interface{}{"message": "value a == b here"}}
-	match, err := cond.Evaluate(ev)
-	require.NoError(t, err)
-	assert.True(t, match)
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cond, err := condition.Parse(tt.expr)
+			require.NoError(t, err)
 
-func TestConditionParserInOperatorQuotedValues(t *testing.T) {
-	cond, err := condition.Parse(`value in "\"a\" , 'b', c"`)
-	require.NoError(t, err)
-
-	assert.True(t, evaluateCondition(t, cond, event.Event{Payload: map[string]interface{}{"value": "a"}}))
-	assert.True(t, evaluateCondition(t, cond, event.Event{Payload: map[string]interface{}{"value": "b"}}))
-	assert.True(t, evaluateCondition(t, cond, event.Event{Payload: map[string]interface{}{"value": "c"}}))
-	assert.False(t, evaluateCondition(t, cond, event.Event{Payload: map[string]interface{}{"value": "d"}}))
-}
-
-func evaluateCondition(t *testing.T, cond condition.Condition, ev event.Event) bool {
-	t.Helper()
-	match, err := cond.Evaluate(ev)
-	require.NoError(t, err)
-	return match
+			match, err := cond.Evaluate(tt.event)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, match)
+		})
+	}
 }
 
 func TestNestedFieldConditions(t *testing.T) {

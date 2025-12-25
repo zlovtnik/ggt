@@ -266,7 +266,7 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 			return nil
 		}
 
-		logger.Info("processing message", zap.String("topic", topic), zap.Int64("offset", r.Offset))
+		logger.Debug("processing message", zap.String("topic", topic), zap.Int64("offset", r.Offset))
 
 		result, err := info.pipe.Execute(hctx, ev)
 		if err != nil {

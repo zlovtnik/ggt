@@ -49,6 +49,10 @@ configs/config.yaml
 # Docker
 docker-compose.override.yml
 
+# JMeter test results
+loadtests/jmeter/results.jtl
+loadtests/jmeter/*.jtl
+
 # Misc
 *.patch
 tmp/

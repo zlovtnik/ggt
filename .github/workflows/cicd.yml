@@ -1,0 +1,165 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+  schedule:
+    - cron: '0 2 * * 1'  # Run benchmarks weekly on Monday at 2 AM UTC
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run tests
+      run: make test
+
+    - name: Run benchmarks
+      if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: make bench
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: Build binary
+      run: make build
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ggt-binary
+        path: bin/ggt
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+  deploy-dev:
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.ref == 'refs/heads/dev'
+    environment: development
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Configure kubectl
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_DEV }}
+
+    - name: Deploy to development
+      run: |
+        # Update Helm chart version with semantic versioning
+        current_version=$(grep '^version:' helm/ggt/Chart.yaml | awk '{print $2}')
+        if [[ ! $current_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Invalid semantic version: $current_version"
+          exit 1
+        fi
+        major=$(echo $current_version | cut -d. -f1)
+        minor=$(echo $current_version | cut -d. -f2)
+        patch=$(echo $current_version | cut -d. -f3)
+        new_patch=$((patch + 1))
+        new_version="${major}.${minor}.${new_patch}"
+        sed -i "s/version: .*/version: ${new_version}/" helm/ggt/Chart.yaml
+
+        # Deploy using Helm
+        helm upgrade --install ggt-dev ./helm/ggt \
+          --namespace development \
+          --create-namespace \
+          --set image.tag=dev-${{ github.sha }}
+
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Configure kubectl
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG_PROD }}
+
+    - name: Deploy to production
+      run: |
+        # Update Helm chart version with semantic versioning
+        current_version=$(grep '^version:' helm/ggt/Chart.yaml | awk '{print $2}')
+        if [[ ! $current_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Invalid semantic version: $current_version"
+          exit 1
+        fi
+        major=$(echo $current_version | cut -d. -f1)
+        minor=$(echo $current_version | cut -d. -f2)
+        patch=$(echo $current_version | cut -d. -f3)
+        new_patch=$((patch + 1))
+        new_version="${major}.${minor}.${new_patch}"
+        sed -i "s/version: ${current_version}/version: ${new_version}/" helm/ggt/Chart.yaml
+
+        # Deploy using Helm
+        helm upgrade --install ggt-prod ./helm/ggt \
+          --namespace production \
+          --create-namespace \
+          --set image.tag=main-${{ github.sha }}

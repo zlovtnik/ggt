@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ggt-service
+  labels:
+    app: ggt
+spec:
+  selector:
+    app: ggt
+  ports:
+  - name: metrics
+    port: 9095
+    targetPort: 9095
+    protocol: TCP
+  - name: health
+    port: 8085
+    targetPort: 8085
+    protocol: TCP
+  type: ClusterIP

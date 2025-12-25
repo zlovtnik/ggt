@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/zlovtnik/ggt/internal/condition"
 )
 
 func (cfg Config) Validate() error {
@@ -69,9 +71,17 @@ func validatePipelineTransforms(descriptors []TransformDescriptor, scope string)
 		if strings.TrimSpace(descriptor.Type) == "" {
 			return fmt.Errorf("%s.transforms[%d].type is required", scope, i)
 		}
+		if strings.TrimSpace(descriptor.Condition) != "" {
+			if _, err := condition.Parse(descriptor.Condition); err != nil {
+				return fmt.Errorf("%s.transforms[%d].condition is invalid: %w", scope, i, err)
+			}
+		}
 		for bIdx, branch := range descriptor.Branches {
 			if strings.TrimSpace(branch.Condition) == "" {
 				return fmt.Errorf("%s.transforms[%d].branches[%d].condition is required", scope, i, bIdx)
+			}
+			if _, err := condition.Parse(branch.Condition); err != nil {
+				return fmt.Errorf("%s.transforms[%d].branches[%d].condition is invalid: %w", scope, i, bIdx, err)
 			}
 			if len(branch.Transforms) == 0 {
 				return fmt.Errorf("%s.transforms[%d].branches[%d].transforms must contain at least one transform", scope, i, bIdx)

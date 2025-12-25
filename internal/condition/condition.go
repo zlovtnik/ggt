@@ -324,9 +324,15 @@ func splitOutsideParens(expr string, sep string) []string {
 	depth := 0
 	start := 0
 	var parts []string
+	inQuote := false
+	var quoteChar byte
 
 	i := 0
 	for i <= len(expr)-len(sep) {
+		if updateQuoteState(expr, i, &inQuote, &quoteChar) {
+			i++
+			continue
+		}
 		switch expr[i] {
 		case '(':
 			depth++
@@ -370,16 +376,10 @@ func findOperatorOutsideQuotes(expr, op string) int {
 	inQuote := false
 	var quoteChar byte
 	for i := 0; i <= len(expr)-len(needle); i++ {
-		ch := expr[i]
-		if (ch == '"' || ch == '\'') && !isEscaped(expr, i) {
-			if inQuote && ch == quoteChar {
-				inQuote = false
-			} else if !inQuote {
-				inQuote = true
-				quoteChar = ch
-			}
+		if updateQuoteState(expr, i, &inQuote, &quoteChar) {
+			continue
 		}
-		if !inQuote && strings.HasPrefix(expr[i:], needle) {
+		if strings.HasPrefix(expr[i:], needle) {
 			return i
 		}
 	}
@@ -396,4 +396,21 @@ func isEscaped(expr string, idx int) bool {
 		count++
 	}
 	return count%2 == 1
+}
+
+// updateQuoteState handles quote entry/exit logic and returns true if currently inside quotes
+func updateQuoteState(expr string, idx int, inQuote *bool, quoteChar *byte) bool {
+	ch := expr[idx]
+	switch ch {
+	case '"', '\'':
+		if !isEscaped(expr, idx) {
+			if *inQuote && ch == *quoteChar {
+				*inQuote = false
+			} else if !*inQuote {
+				*inQuote = true
+				*quoteChar = ch
+			}
+		}
+	}
+	return *inQuote
 }

@@ -132,9 +132,6 @@ func (e Event) SetField(path string, value interface{}) Event {
 	}
 
 	keys := strings.Split(path, ".")
-	if len(keys) == 0 {
-		return e
-	}
 
 	result := Event{
 		Payload:   cloneMapShallow(e.Payload),
@@ -187,9 +184,6 @@ func (e Event) RemoveField(path string) Event {
 	}
 
 	keys := strings.Split(path, ".")
-	if len(keys) == 0 {
-		return e
-	}
 
 	// Verify the field exists and path traversal is valid before allocating new structures.
 	currentOrig := e.Payload
