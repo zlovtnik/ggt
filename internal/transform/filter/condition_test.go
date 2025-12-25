@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zlovtnik/ggt/internal/condition"
 	"github.com/zlovtnik/ggt/internal/transform"
 	"github.com/zlovtnik/ggt/pkg/event"
 )
@@ -392,12 +393,73 @@ func TestConditionParser(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParseCondition(tt.expr)
+			_, err := condition.Parse(tt.expr)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestConditionParserQuotedValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		expr     string
+		event    event.Event
+		expected bool
+	}{
+		{
+			name: "ignores operators in quoted values",
+			expr: `message contains "a == b"`,
+			event: event.Event{
+				Payload: map[string]interface{}{"message": "value a == b here"},
+			},
+			expected: true,
+		},
+		{
+			name: "in operator with escaped quotes",
+			expr: `value in "\"a\" , 'b', c"`,
+			event: event.Event{
+				Payload: map[string]interface{}{"value": "a"},
+			},
+			expected: true,
+		},
+		{
+			name: "in operator with single quotes",
+			expr: `value in "\"a\" , 'b', c"`,
+			event: event.Event{
+				Payload: map[string]interface{}{"value": "b"},
+			},
+			expected: true,
+		},
+		{
+			name: "in operator with unquoted value",
+			expr: `value in "\"a\" , 'b', c"`,
+			event: event.Event{
+				Payload: map[string]interface{}{"value": "c"},
+			},
+			expected: true,
+		},
+		{
+			name: "in operator with value not in list",
+			expr: `value in "\"a\" , 'b', c"`,
+			event: event.Event{
+				Payload: map[string]interface{}{"value": "d"},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cond, err := condition.Parse(tt.expr)
+			require.NoError(t, err)
+
+			match, err := cond.Evaluate(tt.event)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, match)
 		})
 	}
 }

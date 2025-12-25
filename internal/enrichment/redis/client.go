@@ -9,6 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/zlovtnik/ggt/internal/enrichment"
+	"go.uber.org/zap"
 )
 
 // Client wraps a Redis client with connection pooling and caching.
@@ -78,6 +79,13 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("redis: connection test failed: %w", err)
 	}
+
+	zap.L().With(zap.String("component", "redis_client")).Info("redis client ready",
+		zap.String("addr", opts.Addr),
+		zap.Int("db", cfg.DB),
+		zap.Int("pool_size", *cfg.PoolSize),
+		zap.Duration("cache_ttl", *cfg.CacheTTL),
+	)
 
 	// Create cache
 	cache := enrichment.NewLRUCache(cfg.CacheSize, *cfg.CacheTTL)

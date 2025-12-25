@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ggt.fullname" . }}
+  labels:
+    {{- include "ggt.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ggt.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "ggt.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.securityContext.pod }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: ggt
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.config.metrics.port }}
+          name: metrics
+        - containerPort: {{ .Values.config.health.port }}
+          name: health
+        env:
+        - name: TRANSFORM_CONFIG_PATH
+          value: {{ .Values.transform.configPath | quote }}
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        {{- with .Values.securityContext.container }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: {{ .Values.config.health.port }}
+          initialDelaySeconds: {{ .Values.config.health.startupInitialDelay }}
+          periodSeconds: {{ .Values.config.health.startupPeriod }}
+          timeoutSeconds: {{ .Values.config.health.timeout }}
+          failureThreshold: {{ .Values.config.health.failureThreshold }}
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: {{ .Values.config.health.port }}
+          initialDelaySeconds: {{ .Values.config.health.initialDelay }}
+          periodSeconds: {{ .Values.config.health.period }}
+          timeoutSeconds: {{ .Values.config.health.timeout }}
+          failureThreshold: {{ .Values.config.health.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: {{ .Values.config.health.port }}
+          initialDelaySeconds: 15
+          periodSeconds: {{ .Values.config.health.period }}
+          timeoutSeconds: {{ .Values.config.health.timeout }}
+          failureThreshold: {{ .Values.config.health.failureThreshold }}
+      volumes:
+      - name: config-volume
+        configMap:
+          name: {{ include "ggt.fullname" . }}-config
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

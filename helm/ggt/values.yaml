@@ -1,0 +1,69 @@
+# Default values for ggt chart
+replicaCount: 2
+
+image:
+  repository: ggt
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  ports:
+    metrics: 9095
+    health: 8085
+
+config:
+  kafka:
+    brokers: ["kafka-service:9092"]
+    consumerGroup: "ggt-transformers"
+  pipelines:
+    - name: "user-enrichment"
+      inputTopics: ["raw.users"]
+      outputTopic: "enriched.users"
+  metrics:
+    port: 9095
+  health:
+    port: 8085
+    # Probe timing configurations
+    startupInitialDelay: 10
+    startupPeriod: 5
+    initialDelay: 30
+    period: 10
+    timeout: 5
+    failureThreshold: 3
+  logging:
+    level: "info"
+
+transform:
+  configPath: "/app/config/config.yaml"
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+securityContext:
+  # Pod-level security context
+  pod:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  # Container-level security context
+  container:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop:
+        - ALL
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

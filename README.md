@@ -25,3 +25,53 @@ This repository hosts the Transform Service described in [devspec.md](./devspec.
 - [scripts/build.sh](scripts/build.sh) — reusable helpers for build/test/deploy.
 
 See [devspec.md](./devspec.md) for the detailed architecture and planned transforms.
+
+## Deployment
+
+### Local Development with Docker Compose
+
+1. Start the local Kafka stack:
+   ```bash
+   docker-compose up -d
+   ```
+
+2. Build and run the service:
+   ```bash
+   make docker-run
+   ```
+
+### Kubernetes Deployment
+
+1. Apply the Kubernetes manifests:
+   ```bash
+   make k8s-deploy
+   ```
+
+2. Or use Helm:
+   ```bash
+   make helm-install
+   ```
+
+### Production Deployment
+
+The CI/CD pipeline automatically builds and deploys to Kubernetes when changes are pushed to the `main` or `dev` branches.
+
+- **Development**: Deploys to the `development` namespace on push to `dev` branch
+- **Production**: Deploys to the `production` namespace on push to `main` branch
+
+## Configuration
+
+The service is configured via YAML files. See [configs/config.example.yaml](configs/config.example.yaml) for all available options.
+
+Key configuration sections:
+- **Kafka**: Broker addresses, consumer group settings
+- **Pipelines**: Transform definitions with input/output topics
+- **Metrics**: Prometheus configuration
+- **Health**: Health check endpoints
+- **Logging**: Log level and format
+
+## Monitoring
+
+- **Health Checks**: `GET /healthz` on the health port (default: 8080)
+- **Metrics**: Prometheus metrics on `/metrics` (default: 9090)
+- **Logs**: Structured JSON logging with configurable levels

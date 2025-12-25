@@ -51,8 +51,23 @@ type KafkaConfig struct {
 }
 
 type TransformDescriptor struct {
-	Type   string      `yaml:"type" json:"type"`
+	// Type specifies the transform type (e.g., "map", "filter").
+	Type string `yaml:"type" json:"type"`
+	// Config holds transform-specific configuration.
 	Config interface{} `yaml:"config" json:"config"`
+	// Condition is an optional expression; the transform executes only if it evaluates to true.
+	Condition string `yaml:"condition,omitempty" json:"condition,omitempty"`
+	// Branches defines conditional branching; each branch has its own condition and transform chain.
+	Branches []BranchDescriptor `yaml:"branches,omitempty" json:"branches,omitempty"`
+}
+
+// BranchDescriptor declares a conditional branch attached to a transform; when the
+// Condition expression evaluates true for an event, the listed Transforms run in
+// sequence against that event copy. Conditions rely on the shared condition
+// language (e.g. "field == 'value'") and are evaluated in declaration order.
+type BranchDescriptor struct {
+	Condition  string                `yaml:"condition" json:"condition"`
+	Transforms []TransformDescriptor `yaml:"transforms" json:"transforms"`
 }
 
 type PipelineConfig struct {

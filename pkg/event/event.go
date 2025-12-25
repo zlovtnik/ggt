@@ -20,31 +20,51 @@ type Metadata struct {
 }
 
 func (e Event) Clone() Event {
-	payloadCopy := deepCopyMap(e.Payload)
-
-	var headersCopy map[string]string
-	if e.Headers != nil {
-		headersCopy = make(map[string]string, len(e.Headers))
-		for k, v := range e.Headers {
-			headersCopy[k] = v
-		}
-	}
-
-	var keyCopy []byte
-	if e.Metadata.Key != nil {
-		keyCopy = make([]byte, len(e.Metadata.Key))
-		copy(keyCopy, e.Metadata.Key)
-	}
-
-	metadataCopy := e.Metadata
-	metadataCopy.Key = keyCopy
-
 	return Event{
-		Payload:   payloadCopy,
-		Metadata:  metadataCopy,
+		Payload:   deepCopyMap(e.Payload),
+		Metadata:  cloneMetadata(e.Metadata),
 		Timestamp: e.Timestamp,
-		Headers:   headersCopy,
+		Headers:   cloneStringMap(e.Headers),
 	}
+}
+
+func cloneStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+
+	result := make(map[string]string, len(m))
+	for k, v := range m {
+		result[k] = v
+	}
+
+	return result
+}
+
+func cloneMetadata(meta Metadata) Metadata {
+	metadataCopy := meta
+	if meta.Key != nil {
+		keyCopy := make([]byte, len(meta.Key))
+		copy(keyCopy, meta.Key)
+		metadataCopy.Key = keyCopy
+	} else {
+		metadataCopy.Key = nil
+	}
+
+	return metadataCopy
+}
+
+func cloneMapShallow(m map[string]interface{}) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		result[k] = v
+	}
+
+	return result
 }
 
 func deepCopyMap(m map[string]interface{}) map[string]interface{} {
@@ -111,57 +131,106 @@ func (e Event) SetField(path string, value interface{}) Event {
 		return e
 	}
 
-	result := e.Clone()
+	keys := strings.Split(path, ".")
+
+	result := Event{
+		Payload:   cloneMapShallow(e.Payload),
+		Metadata:  cloneMetadata(e.Metadata),
+		Timestamp: e.Timestamp,
+		Headers:   cloneStringMap(e.Headers),
+	}
+
 	if result.Payload == nil {
 		result.Payload = make(map[string]interface{})
 	}
 
-	keys := strings.Split(path, ".")
-	current := result.Payload
+	currentNew := result.Payload
+	var currentOrig map[string]interface{}
+	if e.Payload != nil {
+		currentOrig = e.Payload
+	}
 
 	for i, key := range keys {
 		if i == len(keys)-1 {
-			current[key] = value
+			currentNew[key] = value
 			break
 		}
 
-		next, ok := current[key].(map[string]interface{})
-		if !ok {
-			next = make(map[string]interface{})
-			current[key] = next
+		var origNext map[string]interface{}
+		if currentOrig != nil {
+			if val, ok := currentOrig[key]; ok {
+				if typed, ok := val.(map[string]interface{}); ok {
+					origNext = typed
+				}
+			}
 		}
 
-		current = next
+		nextMap := cloneMapShallow(origNext)
+		if nextMap == nil {
+			nextMap = make(map[string]interface{})
+		}
+
+		currentNew[key] = nextMap
+		currentNew = nextMap
+		currentOrig = origNext
 	}
 
 	return result
 }
 
 func (e Event) RemoveField(path string) Event {
-	if path == "" {
+	if path == "" || e.Payload == nil {
 		return e
 	}
 
-	result := e.Clone()
-	if result.Payload == nil {
-		return result
+	keys := strings.Split(path, ".")
+
+	// Verify the field exists and path traversal is valid before allocating new structures.
+	currentOrig := e.Payload
+	for i, key := range keys {
+		val, ok := currentOrig[key]
+		if !ok {
+			return e
+		}
+
+		if i == len(keys)-1 {
+			break
+		}
+
+		nested, ok := val.(map[string]interface{})
+		if !ok {
+			return e
+		}
+		currentOrig = nested
 	}
 
-	keys := strings.Split(path, ".")
-	current := result.Payload
+	result := Event{
+		Payload:   cloneMapShallow(e.Payload),
+		Metadata:  cloneMetadata(e.Metadata),
+		Timestamp: e.Timestamp,
+		Headers:   cloneStringMap(e.Headers),
+	}
+
+	currentNew := result.Payload
+	currentOrig = e.Payload
 
 	for i, key := range keys {
 		if i == len(keys)-1 {
-			delete(current, key)
-			return result
+			delete(currentNew, key)
+			break
 		}
 
-		nested, ok := current[key].(map[string]interface{})
-		if !ok {
-			return result
+		origVal, _ := currentOrig[key]
+		origMap, _ := origVal.(map[string]interface{})
+
+		clonedNext := cloneMapShallow(origMap)
+		if clonedNext == nil {
+			clonedNext = make(map[string]interface{})
 		}
 
-		current = nested
+		currentNew[key] = clonedNext
+		currentNew = clonedNext
+		currentOrig = origMap
 	}
 
 	return result

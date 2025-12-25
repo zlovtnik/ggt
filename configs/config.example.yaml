@@ -93,6 +93,46 @@ transforms:
           config:
             condition: "payload.status == 'completed'"
             on_false: drop
+    - name: conditional_processing
+      input_topics:
+        - raw.events
+      output_topic: processed.events
+      dlq_topic: dlq.events
+      transforms:
+        - type: field.add
+          config:
+            fields:
+              processed_at: "{{now}}"
+        - type: field.rename
+          condition: "payload.type == 'user'"
+          config:
+            mappings:
+              user_id: id
+        - type: data.convert
+          branches:
+            - condition: "payload.category == 'order'"
+              transforms:
+                - type: data.convert
+                  config:
+                    fields:
+                      - name: amount
+                        from: string
+                        to: float64
+                - type: field.add
+                  config:
+                    fields:
+                      order_processed: true
+            - condition: "payload.category == 'notification'"
+              transforms:
+                - type: field.rename
+                  config:
+                    mappings:
+                      message: content
+                - type: data.mask
+                  config:
+                    fields:
+                      - email
+                    mask_type: full
 
 enrichment:
   redis:

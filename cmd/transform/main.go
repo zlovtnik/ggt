@@ -55,6 +55,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to build logger: %v\n", err)
 		os.Exit(1)
 	}
+	zap.ReplaceGlobals(logger)
 	defer logger.Sync()
 
 	logger.Info("transform service booting", zap.String("service", cfg.Service.Name))
@@ -245,32 +246,69 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 		}
 
 		if err := json.Unmarshal(r.Value, &ev.Payload); err != nil {
-			logger.Error("failed to unmarshal payload", zap.Error(err))
-			return err
+			logger.Error("failed to unmarshal payload", zap.Error(err), zap.String("topic", topic), zap.Int32("partition", r.Partition), zap.Int64("offset", r.Offset))
+
+			dlqTopic := strings.TrimSpace(info.cfg.DLQTopic)
+			if dlqTopic != "" {
+				if sendErr := w.prod.Send(hctx, dlqTopic, r.Key, r.Value); sendErr != nil {
+					logger.Error("failed to send malformed payload to DLQ", zap.Error(sendErr), zap.String("dlq_topic", dlqTopic))
+					return sendErr
+				}
+				if w.metrics != nil {
+					w.metrics.MessagesSentToDLQ.Inc()
+				}
+				return nil
+			}
+
+			if w.metrics != nil {
+				w.metrics.MessagesDropped.Inc()
+			}
+			return nil
 		}
+
+		logger.Debug("processing message", zap.String("topic", topic), zap.Int64("offset", r.Offset))
 
 		result, err := info.pipe.Execute(hctx, ev)
 		if err != nil {
 			if err == transform.ErrDrop {
+				if w.metrics != nil {
+					w.metrics.MessagesDropped.Inc()
+				}
 				return nil
 			}
-			logger.Error("pipeline error", zap.Error(err))
-			// Send to DLQ
-			// Send to DLQ if configured
-			dlqTopic := info.cfg.DLQTopic
+
+			logger.Error("pipeline error", zap.Error(err), zap.String("pipeline", info.cfg.Name))
+
+			dlqTopic := strings.TrimSpace(info.cfg.DLQTopic)
 			if dlqTopic != "" {
-				if evt, ok := result.(event.Event); ok {
-					dlqValue, marshalErr := json.Marshal(evt.Payload)
+				var dlqPayload []byte
+				switch evt := result.(type) {
+				case event.Event:
+					marshaled, marshalErr := json.Marshal(evt.Payload)
 					if marshalErr != nil {
-						logger.Error("failed to marshal DLQ payload", zap.Error(marshalErr))
-					} else if sendErr := w.prod.Send(hctx, dlqTopic, r.Key, dlqValue); sendErr != nil {
-						logger.Error("failed to send to DLQ", zap.Error(sendErr))
+						logger.Error("failed to marshal DLQ payload", zap.Error(marshalErr), zap.String("pipeline", info.cfg.Name))
+						dlqPayload = r.Value
+					} else {
+						dlqPayload = marshaled
 					}
-				} else {
-					logger.Error("cannot send to DLQ: result is not an event", zap.String("type", fmt.Sprintf("%T", result)))
+				default:
+					dlqPayload = r.Value
 				}
+
+				if sendErr := w.prod.Send(hctx, dlqTopic, r.Key, dlqPayload); sendErr != nil {
+					logger.Error("failed to send to DLQ", zap.Error(sendErr), zap.String("dlq_topic", dlqTopic))
+					return sendErr
+				}
+				if w.metrics != nil {
+					w.metrics.MessagesSentToDLQ.Inc()
+				}
+				return nil
 			}
-			return err
+
+			if w.metrics != nil {
+				w.metrics.MessagesDropped.Inc()
+			}
+			return nil
 		}
 
 		// Send to output - handle both single and multiple events
@@ -278,6 +316,16 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 		if outputTopic == "" {
 			logger.Error("output topic is not configured or empty")
 			return fmt.Errorf("output topic is required but not configured")
+		}
+
+		appendIndexToKey := func(base []byte, idx int) []byte {
+			if base == nil {
+				return strconv.AppendInt([]byte("multi-"), int64(idx), 10)
+			}
+			copied := make([]byte, len(base))
+			copy(copied, base)
+			copied = append(copied, '-')
+			return strconv.AppendInt(copied, int64(idx), 10)
 		}
 
 		switch result := result.(type) {
@@ -295,7 +343,9 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 						logger.Error("failed to send to DLQ", zap.Error(err))
 						return err
 					}
-					w.metrics.MessagesSentToDLQ.Inc()
+					if w.metrics != nil {
+						w.metrics.MessagesSentToDLQ.Inc()
+					}
 					return nil
 				}
 			}
@@ -310,7 +360,9 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 			if routeTarget, ok := result.Headers["_route_target"]; ok && routeTarget != "" {
 				sendTopic = routeTarget
 				// Increment routing metrics
-				w.metrics.RoutingMetrics.WithLabelValues("filter.route", sendTopic).Inc()
+				if w.metrics != nil {
+					w.metrics.RoutingMetrics.WithLabelValues("filter.route", sendTopic).Inc()
+				}
 			}
 			if err := w.prod.Send(hctx, sendTopic, r.Key, outputValue); err != nil {
 				logger.Error("failed to send to output", zap.Error(err))
@@ -332,18 +384,16 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 						}
 						key := r.Key
 						if len(result) > 1 {
-							if key == nil {
-								key = strconv.AppendInt([]byte("multi-"), int64(i), 10)
-							} else {
-								key = strconv.AppendInt(append(key, '-'), int64(i), 10)
-							}
+							key = appendIndexToKey(key, i)
 						}
 						if err := w.prod.Send(hctx, dlqTopic, key, dlqValue); err != nil {
 							logger.Error("failed to send to DLQ", zap.Error(err), zap.Int("index", i))
 							failedIndices = append(failedIndices, i)
 							continue
 						}
-						w.metrics.MessagesSentToDLQ.Inc()
+						if w.metrics != nil {
+							w.metrics.MessagesSentToDLQ.Inc()
+						}
 						continue
 					}
 				}
@@ -357,18 +407,16 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 				key := r.Key
 				if len(result) > 1 {
 					// Append index to key to make it unique
-					if key == nil {
-						key = strconv.AppendInt([]byte("multi-"), int64(i), 10)
-					} else {
-						key = strconv.AppendInt(append(key, '-'), int64(i), 10)
-					}
+					key = appendIndexToKey(key, i)
 				}
 				// Check for routing header
 				sendTopic := outputTopic
 				if routeTarget, ok := evt.Headers["_route_target"]; ok && routeTarget != "" {
 					sendTopic = routeTarget
 					// Increment routing metrics
-					w.metrics.RoutingMetrics.WithLabelValues("filter.route", sendTopic).Inc()
+					if w.metrics != nil {
+						w.metrics.RoutingMetrics.WithLabelValues("filter.route", sendTopic).Inc()
+					}
 				}
 				if err := w.prod.Send(hctx, sendTopic, key, outputValue); err != nil {
 					logger.Error("failed to send to output", zap.Error(err), zap.Int("index", i))
@@ -391,6 +439,10 @@ func startPipelineWorker(parent context.Context, logger *zap.Logger, metricsColl
 		default:
 			logger.Error("unexpected result type from pipeline", zap.String("type", fmt.Sprintf("%T", result)))
 			return fmt.Errorf("unexpected result type: %T", result)
+		}
+
+		if w.metrics != nil {
+			w.metrics.MessagesProcessed.Inc()
 		}
 
 		return nil
