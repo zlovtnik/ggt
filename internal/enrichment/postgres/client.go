@@ -5,11 +5,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/lib/pq"
 	"github.com/zlovtnik/ggt/internal/enrichment"
+	"go.uber.org/zap"
 )
 
 const maxPreparedStmts = 500
@@ -108,6 +111,27 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("postgres: ping failed: %w", err)
 	}
+
+	logger := zap.L().With(zap.String("component", "postgres_client"))
+	fields := []zap.Field{
+		zap.Int("max_open_conns", cfg.MaxOpenConns),
+		zap.Int("max_idle_conns", cfg.MaxIdleConns),
+		zap.Duration("conn_max_lifetime", cfg.ConnMaxLifetime),
+	}
+	if parsed, err := url.Parse(cfg.URL); err == nil {
+		if host := parsed.Hostname(); host != "" {
+			fields = append(fields, zap.String("host", host))
+		}
+		if port := parsed.Port(); port != "" {
+			fields = append(fields, zap.String("port", port))
+		}
+		if dbName := strings.TrimPrefix(parsed.Path, "/"); dbName != "" {
+			fields = append(fields, zap.String("database", dbName))
+		}
+	} else {
+		fields = append(fields, zap.String("dsn", "unparseable"))
+	}
+	logger.Info("postgres client ready", fields...)
 
 	cache := enrichment.NewLRUCache(cfg.CacheSize, cfg.CacheTTL)
 

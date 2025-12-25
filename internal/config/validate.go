@@ -51,12 +51,35 @@ func (cfg Config) Validate() error {
 		if strings.TrimSpace(pipeline.OutputTopic) == "" {
 			return fmt.Errorf("transforms.pipelines[%d].output_topic is required", idx)
 		}
+		if err := validatePipelineTransforms(pipeline.Transforms, fmt.Sprintf("transforms.pipelines[%d]", idx)); err != nil {
+			return err
+		}
 	}
 	if strings.TrimSpace(cfg.Metrics.Namespace) == "" {
 		return errors.New("metrics.namespace is required")
 	}
 	if strings.TrimSpace(cfg.Metrics.Subsystem) == "" {
 		return errors.New("metrics.subsystem is required")
+	}
+	return nil
+}
+
+func validatePipelineTransforms(descriptors []TransformDescriptor, scope string) error {
+	for i, descriptor := range descriptors {
+		if strings.TrimSpace(descriptor.Type) == "" {
+			return fmt.Errorf("%s.transforms[%d].type is required", scope, i)
+		}
+		for bIdx, branch := range descriptor.Branches {
+			if strings.TrimSpace(branch.Condition) == "" {
+				return fmt.Errorf("%s.transforms[%d].branches[%d].condition is required", scope, i, bIdx)
+			}
+			if len(branch.Transforms) == 0 {
+				return fmt.Errorf("%s.transforms[%d].branches[%d].transforms must contain at least one transform", scope, i, bIdx)
+			}
+			if err := validatePipelineTransforms(branch.Transforms, fmt.Sprintf("%s.transforms[%d].branches[%d]", scope, i, bIdx)); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

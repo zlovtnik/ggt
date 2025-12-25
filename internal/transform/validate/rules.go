@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/zlovtnik/ggt/internal/condition"
 	"github.com/zlovtnik/ggt/internal/transform"
-	"github.com/zlovtnik/ggt/internal/transform/filter"
 	"github.com/zlovtnik/ggt/pkg/event"
 )
 
@@ -21,7 +21,7 @@ type RulesConfig struct {
 // rulesTransform implements validate.rules with custom rule expressions
 type rulesTransform struct {
 	cfg   RulesConfig
-	rules map[string]filter.Condition
+	rules map[string]condition.Condition
 }
 
 func (r *rulesTransform) Name() string { return "validate.rules" }
@@ -44,9 +44,9 @@ func (r *rulesTransform) Configure(raw json.RawMessage) error {
 	}
 
 	// Parse and validate all rule expressions
-	r.rules = make(map[string]filter.Condition)
+	r.rules = make(map[string]condition.Condition)
 	for ruleName, expr := range r.cfg.Rules {
-		cond, err := filter.ParseCondition(expr)
+		cond, err := condition.Parse(expr)
 		if err != nil {
 			return fmt.Errorf("invalid rule '%s': %w", ruleName, err)
 		}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/zlovtnik/ggt/internal/condition"
 	"github.com/zlovtnik/ggt/internal/transform"
 	"github.com/zlovtnik/ggt/pkg/event"
 )
@@ -16,9 +17,9 @@ const (
 
 // validateTopicCharacters checks for invalid characters in topic names
 func validateTopicCharacters(name string) error {
-	for _, char := range name {
+	for idx, char := range name {
 		if char == '\x00' || char == '\n' || char == '\r' {
-			return fmt.Errorf("topic name contains invalid character")
+			return fmt.Errorf("topic name contains invalid character %q at position %d", char, idx)
 		}
 	}
 	return nil
@@ -38,7 +39,13 @@ type ConditionRoute struct {
 
 // routeTransform implements filter.route for dynamic topic routing
 type routeTransform struct {
-	cfg RouteConfig
+	cfg   RouteConfig
+	rules []compiledRoute
+}
+
+type compiledRoute struct {
+	cond  condition.Condition
+	topic string
 }
 
 func (r *routeTransform) Name() string { return "filter.route" }
@@ -68,6 +75,7 @@ func (r *routeTransform) Configure(raw json.RawMessage) error {
 	}
 
 	// Validate all condition expressions
+	r.rules = make([]compiledRoute, len(r.cfg.Conditions))
 	for i, entry := range r.cfg.Conditions {
 		if entry.Condition == "" {
 			return fmt.Errorf("condition %d: expression cannot be empty", i)
@@ -86,9 +94,11 @@ func (r *routeTransform) Configure(raw json.RawMessage) error {
 			return fmt.Errorf("condition %d: %w", i, err)
 		}
 		// Validate the condition expression by parsing it
-		if _, err := ParseCondition(entry.Condition); err != nil {
+		cond, err := condition.Parse(entry.Condition)
+		if err != nil {
 			return fmt.Errorf("condition %d: invalid expression '%s': %w", i, entry.Condition, err)
 		}
+		r.rules[i] = compiledRoute{cond: cond, topic: entry.Topic}
 	}
 
 	return nil
@@ -106,17 +116,13 @@ func (r *routeTransform) Execute(ctx context.Context, e interface{}) (interface{
 	}
 
 	// Evaluate conditions in order to find matching route
-	for _, entry := range r.cfg.Conditions {
-		cond, err := ParseCondition(entry.Condition)
-		if err != nil {
-			return nil, fmt.Errorf("condition parsing failed: %w", err)
-		}
-		match, err := cond.Evaluate(ev)
+	for _, entry := range r.rules {
+		match, err := entry.cond.Evaluate(ev)
 		if err != nil {
 			return nil, fmt.Errorf("condition evaluation failed: %w", err)
 		}
 		if match {
-			ev.Headers["_route_target"] = entry.Topic
+			ev.Headers["_route_target"] = entry.topic
 			return ev, nil
 		}
 	}

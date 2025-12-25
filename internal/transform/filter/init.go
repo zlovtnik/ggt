@@ -22,4 +22,12 @@ func init() {
 		}
 		return t, nil
 	})
+
+	transform.Register("filter.split", func(raw json.RawMessage) (transform.Transform, error) {
+		t := &splitTransform{}
+		if err := t.Configure(raw); err != nil {
+			return nil, err
+		}
+		return t, nil
+	})
 }

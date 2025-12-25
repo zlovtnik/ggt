@@ -117,6 +117,11 @@ func NewConsumer(cfg ConsumerConfig, logger *zap.Logger) (*Consumer, error) {
 	}
 
 	c.client = client
+	c.logger.Info("kafka consumer connected",
+		zap.Strings("brokers", cfg.Brokers),
+		zap.String("group_id", cfg.GroupID),
+		zap.Strings("topics", cfg.Topics),
+	)
 	c.done = make(chan struct{})
 	c.errCh = make(chan error, 10) // buffered to track multiple errors
 	if cfg.HandlerTimeout > 0 {

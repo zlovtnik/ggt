@@ -58,7 +58,13 @@ func NewProducer(cfg ProducerConfig, logger *zap.Logger) (*Producer, error) {
 		return nil, fmt.Errorf("failed to create franz-go client: %w", err)
 	}
 
-	return &Producer{client: client, cfg: cfg, logger: logger.With(zap.String("component", "producer"))}, nil
+	componentLogger := logger.With(zap.String("component", "producer"))
+	componentLogger.Info("kafka producer initialized",
+		zap.Int("broker_count", len(cfg.Brokers)),
+		zap.String("acks", cfg.Acks),
+	)
+
+	return &Producer{client: client, cfg: cfg, logger: componentLogger}, nil
 }
 
 // Send publishes a message. This is a placeholder; batching, compression

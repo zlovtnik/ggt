@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zlovtnik/ggt/internal/condition"
 	"github.com/zlovtnik/ggt/internal/transform"
 	"github.com/zlovtnik/ggt/pkg/event"
 )
@@ -392,7 +393,7 @@ func TestConditionParser(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParseCondition(tt.expr)
+			_, err := condition.Parse(tt.expr)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -400,6 +401,33 @@ func TestConditionParser(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConditionParserIgnoresOperatorsInQuotedValues(t *testing.T) {
+	cond, err := condition.Parse(`message contains "a == b"`)
+	require.NoError(t, err)
+
+	ev := event.Event{Payload: map[string]interface{}{"message": "value a == b here"}}
+	match, err := cond.Evaluate(ev)
+	require.NoError(t, err)
+	assert.True(t, match)
+}
+
+func TestConditionParserInOperatorQuotedValues(t *testing.T) {
+	cond, err := condition.Parse(`value in "\"a\" , 'b', c"`)
+	require.NoError(t, err)
+
+	assert.True(t, evaluateCondition(t, cond, event.Event{Payload: map[string]interface{}{"value": "a"}}))
+	assert.True(t, evaluateCondition(t, cond, event.Event{Payload: map[string]interface{}{"value": "b"}}))
+	assert.True(t, evaluateCondition(t, cond, event.Event{Payload: map[string]interface{}{"value": "c"}}))
+	assert.False(t, evaluateCondition(t, cond, event.Event{Payload: map[string]interface{}{"value": "d"}}))
+}
+
+func evaluateCondition(t *testing.T, cond condition.Condition, ev event.Event) bool {
+	t.Helper()
+	match, err := cond.Evaluate(ev)
+	require.NoError(t, err)
+	return match
 }
 
 func TestNestedFieldConditions(t *testing.T) {
