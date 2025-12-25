@@ -25,53 +25,79 @@ This repository hosts the Transform Service described in [devspec.md](./devspec.
 - [scripts/build.sh](scripts/build.sh) — reusable helpers for build/test/deploy.
 
 See [devspec.md](./devspec.md) for the detailed architecture and planned transforms.
+# ggt — Kafka Transform Service
 
-## Deployment
+A small, fast Kafka-to-Kafka transform service for stream processing and CDC pipelines. ggt reads events from Kafka, runs configurable transform pipelines, and produces results to output topics — with metrics, health checks, and configurable retries/DLQ handling.
 
-### Local Development with Docker Compose
+Why ggt?
+- Lightweight, production-minded transform scaffolding in Go.
+- Pluggable transforms registered via packages under `internal/transform`.
+- Built-in metrics (Prometheus), structured logging (zap), and graceful shutdown.
 
-1. Start the local Kafka stack:
-   ```bash
-   docker-compose up -d
-   ```
+## Quick start
+1. Copy the example config:
 
-2. Build and run the service:
-   ```bash
-   make docker-run
-   ```
+   cp configs/config.example.yaml configs/config.yaml
 
-### Kubernetes Deployment
+2. Build the binary:
 
-1. Apply the Kubernetes manifests:
-   ```bash
-   make k8s-deploy
-   ```
+   make build
 
-2. Or use Helm:
-   ```bash
-   make helm-install
-   ```
+3. Run locally (uses your `configs/config.yaml`):
 
-### Production Deployment
+   bin/ggt
 
-The CI/CD pipeline automatically builds and deploys to Kubernetes when changes are pushed to the `main` or `dev` branches.
+4. Check health and metrics:
 
-- **Development**: Deploys to the `development` namespace on push to `dev` branch
-- **Production**: Deploys to the `production` namespace on push to `main` branch
+   curl http://localhost:8080/healthz
+   curl http://localhost:9090/metrics
 
 ## Configuration
+- Primary config: [configs/config.example.yaml](configs/config.example.yaml)
+- Important keys: `service.metrics_port`, `service.health_port`, Kafka brokers, pipeline definitions (input_topics/output_topic/dlq_topic).
+- Environment overrides: set `TRANSFORM_CONFIG_PATH` to point to a custom config file.
 
-The service is configured via YAML files. See [configs/config.example.yaml](configs/config.example.yaml) for all available options.
+## Development
+- Run tests:
 
-Key configuration sections:
-- **Kafka**: Broker addresses, consumer group settings
-- **Pipelines**: Transform definitions with input/output topics
-- **Metrics**: Prometheus configuration
-- **Health**: Health check endpoints
-- **Logging**: Log level and format
+  make test
 
-## Monitoring
+- Build locally:
 
-- **Health Checks**: `GET /healthz` on the health port (default: 8080)
-- **Metrics**: Prometheus metrics on `/metrics` (default: 9090)
-- **Logs**: Structured JSON logging with configurable levels
+  make build
+
+- Run a single transform unit test or bench from its package under `internal/transform`.
+
+## Docker & Kubernetes
+- Local dev with Docker Compose (starts Kafka):
+
+  docker-compose up -d
+
+- Build a docker image and run with compose or your registry. See `Dockerfile` and `Makefile` targets.
+- Kubernetes: manifests are in `k8s/` and a Helm chart in `helm/ggt`.
+
+## Project layout (high level)
+- `cmd/transform` — main program wiring config, consumer, producer, metrics and health.
+- `internal/transform` — transform registration and pipeline builder.
+- `internal/consumer`, `internal/producer` — Kafka IO wrappers.
+- `internal/config` — config schema and loader.
+- `pkg/event` — immutable event helpers used across transforms.
+
+## Contributing
+- Implement transforms under `internal/transform/*` and register them via `transform.Register` in `init()`.
+- Keep changes focused; run `make test` and `go vet` before pushing.
+- Update `docs/architecture.md` and `devspec.md` when adding major features.
+
+## Useful commands
+- Build: `make build`
+- Test: `make test` or `go test ./...`
+- Run locally: `bin/ggt`
+
+## Where to look next
+- [devspec.md](devspec.md) — architecture and transform design.
+- [configs/config.example.yaml](configs/config.example.yaml) — all configuration options.
+
+## License
+- Licensed under the MIT License. See [LICENSE](LICENSE).
+
+If you want, I can add badges, a quick diagram, or a short example pipeline config next.
