@@ -40,17 +40,30 @@ func (p *Processor) Enqueue(ctx context.Context, evt event.Event) error {
 	if p == nil {
 		return fmt.Errorf("processor is nil")
 	}
+	// quick reject if shutdown already started
 	if atomic.LoadUint32(&p.shutdown) == 1 {
 		return fmt.Errorf("processor is shutting down")
 	}
+
+	// mark work as pending before acquiring a worker slot so Stop()
+	// will properly wait for any enqueues that passed the shutdown check.
+	p.wg.Add(1)
+	// If shutdown flipped between the check above and Add, unwind and reject.
+	if atomic.LoadUint32(&p.shutdown) == 1 {
+		p.wg.Done()
+		return fmt.Errorf("processor is shutting down")
+	}
+
+	// Acquire a worker slot; if context is done before a slot is available,
+	// ensure we decrement the waitgroup so Stop() doesn't hang.
 	select {
 	case p.workerSem <- struct{}{}:
 		// acquired slot
 	case <-ctx.Done():
+		p.wg.Done()
 		return ctx.Err()
 	}
 
-	p.wg.Add(1)
 	go func() {
 		defer func() { <-p.workerSem; p.wg.Done() }()
 		if err := p.handler(ctx, evt); err != nil {

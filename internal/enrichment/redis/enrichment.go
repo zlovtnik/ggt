@@ -151,6 +151,7 @@ func RegisterRedisEnrichment(cfg config.RedisEnrichment) error {
 		PoolSize:   &cfg.PoolSize,
 		CacheTTL:   &ttl,
 		CacheSize:  cacheSize,
+		RetryCount: cfg.RetryCount,
 	}
 
 	client, err := NewClient(clientCfg)

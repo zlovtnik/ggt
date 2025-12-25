@@ -14,10 +14,12 @@ import (
 
 // Client wraps a Redis client with connection pooling and caching.
 type Client struct {
-	client   *redis.Client
-	cache    *enrichment.LRUCache
-	config   *ClientConfig
-	cacheTTL time.Duration
+	client    *redis.Client
+	cache     *enrichment.LRUCache
+	config    *ClientConfig
+	cacheTTL  time.Duration
+	opTimeout time.Duration
+	retryCfg  *enrichment.RetryConfig
 }
 
 // ClientConfig holds Redis client configuration.
@@ -29,6 +31,21 @@ type ClientConfig struct {
 	PoolSize   *int
 	CacheTTL   *time.Duration
 	CacheSize  int
+	// OperationTimeout is the default timeout for individual Redis operations
+	// when a context without deadline is provided. Zero means no timeout.
+	OperationTimeout *time.Duration
+	// RetryCount controls how many attempts are made for transient errors.
+	RetryCount int
+	// InitialBackoff is the initial backoff duration for retries. If nil or
+	// non-positive the default of 100ms is used.
+	InitialBackoff *time.Duration
+	// MaxBackoff is the maximum backoff duration for retries. If nil or
+	// less than InitialBackoff the MaxBackoff will be clamped to
+	// InitialBackoff (or default 2s).
+	MaxBackoff *time.Duration
+	// BackoffMultiplier scales the backoff between attempts. If nil or
+	// non-positive the default of 2.0 is used.
+	BackoffMultiplier *float64
 }
 
 // NewClient creates a new Redis client with connection pooling and LRU cache.
@@ -72,8 +89,42 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 
 	client := redis.NewClient(opts)
 
+	// Determine operation timeout (default 5s). Treat nil or non-positive
+	// durations as the default to avoid passing invalid values to
+	// context.WithTimeout.
+	var opTimeout time.Duration
+	if cfg.OperationTimeout == nil || *cfg.OperationTimeout <= 0 {
+		opTimeout = 5 * time.Second
+	} else {
+		opTimeout = *cfg.OperationTimeout
+	}
+
+	// Determine retry count (default 3)
+	retryCount := cfg.RetryCount
+	if retryCount <= 0 {
+		retryCount = 3
+	}
+
+	// Determine backoff parameters (defaults: 100ms, 2s, 2.0)
+	initialBackoff := 100 * time.Millisecond
+	if cfg.InitialBackoff != nil && *cfg.InitialBackoff > 0 {
+		initialBackoff = *cfg.InitialBackoff
+	}
+	maxBackoff := 2 * time.Second
+	if cfg.MaxBackoff != nil && *cfg.MaxBackoff > 0 {
+		maxBackoff = *cfg.MaxBackoff
+	}
+	// Ensure MaxBackoff is at least InitialBackoff
+	if maxBackoff < initialBackoff {
+		maxBackoff = initialBackoff
+	}
+	backoffMultiplier := 2.0
+	if cfg.BackoffMultiplier != nil && *cfg.BackoffMultiplier > 0 {
+		backoffMultiplier = *cfg.BackoffMultiplier
+	}
+
 	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
@@ -91,11 +142,26 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 	cache := enrichment.NewLRUCache(cfg.CacheSize, *cfg.CacheTTL)
 
 	return &Client{
-		client:   client,
-		cache:    cache,
-		config:   cfg,
-		cacheTTL: *cfg.CacheTTL,
+		client:    client,
+		cache:     cache,
+		config:    cfg,
+		cacheTTL:  *cfg.CacheTTL,
+		opTimeout: opTimeout,
+		retryCfg:  &enrichment.RetryConfig{MaxRetries: retryCount, InitialBackoff: initialBackoff, MaxBackoff: maxBackoff, BackoffMultiplier: backoffMultiplier},
 	}, nil
+}
+
+// ensureCtx returns a context with the client's opTimeout applied if the
+// provided context does not already have a deadline. If a new context is
+// created, a cancel function is returned which must be called by the caller.
+func (c *Client) ensureCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if c == nil || c.opTimeout == 0 {
+		return ctx, nil
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, nil
+	}
+	return context.WithTimeout(ctx, c.opTimeout)
 }
 
 // Get retrieves a value from Redis, with local caching using client's configured TTL.
@@ -115,12 +181,29 @@ func (c *Client) GetWithTTL(ctx context.Context, key string, ttl time.Duration) 
 	}
 
 	// Query Redis
-	val, err := c.client.Get(ctx, key).Result()
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+
+	var val string
+	// Try once first; if transient error, fall back to retries. Preserve redis.Nil as a distinct outcome.
+	val, err := c.client.Get(ctx2, key).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
+			// propagate missing key to caller as empty value with nil error historically; keep behavior for Get
+			// (callers expecting distinction should use HGet which preserves redis.Nil).
 			return "", nil
 		}
-		return "", fmt.Errorf("redis: get failed: %w", err)
+		// transient error -> retry
+		err = enrichment.Do(ctx2, c.retryCfg, func() error {
+			var errInner error
+			val, errInner = c.client.Get(ctx2, key).Result()
+			return errInner
+		})
+		if err != nil {
+			return "", fmt.Errorf("redis: get failed: %w", err)
+		}
 	}
 
 	// Cache the result with custom TTL
@@ -140,12 +223,26 @@ func (c *Client) GetJSON(ctx context.Context, key string, dest interface{}) erro
 	}
 
 	// Query Redis
-	val, err := c.client.Get(ctx, key).Result()
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+
+	var val string
+	// Try once first; preserve redis.Nil and retry on other transient errors.
+	val, err := c.client.Get(ctx2, key).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return nil
 		}
-		return fmt.Errorf("redis: getjson failed: %w", err)
+		err = enrichment.Do(ctx2, c.retryCfg, func() error {
+			var errInner error
+			val, errInner = c.client.Get(ctx2, key).Result()
+			return errInner
+		})
+		if err != nil {
+			return fmt.Errorf("redis: getjson failed: %w", err)
+		}
 	}
 
 	// Unmarshal JSON
@@ -160,7 +257,12 @@ func (c *Client) GetJSON(ctx context.Context, key string, dest interface{}) erro
 
 // Set stores a string value in Redis.
 func (c *Client) Set(ctx context.Context, key string, value string, expiration time.Duration) error {
-	if err := c.client.Set(ctx, key, value, expiration).Err(); err != nil {
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+	// Writes are not retried by default to avoid duplicate side-effects. Perform a single attempt
+	if err := c.client.Set(ctx2, key, value, expiration).Err(); err != nil {
 		return fmt.Errorf("redis: set failed: %w", err)
 	}
 	c.cache.Delete(key)
@@ -174,7 +276,13 @@ func (c *Client) SetJSON(ctx context.Context, key string, value interface{}, exp
 		return fmt.Errorf("redis: json marshal failed: %w", err)
 	}
 
-	if err := c.client.Set(ctx, key, data, expiration).Err(); err != nil {
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+
+	// Writes are not retried by default to avoid duplicate side-effects. Perform a single attempt
+	if err := c.client.Set(ctx2, key, data, expiration).Err(); err != nil {
 		return fmt.Errorf("redis: setjson failed: %w", err)
 	}
 
@@ -188,7 +296,13 @@ func (c *Client) Delete(ctx context.Context, keys ...string) error {
 		return nil
 	}
 
-	if err := c.client.Del(ctx, keys...).Err(); err != nil {
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+
+	// Delete is a write operation and not retried by default to avoid duplicate side-effects.
+	if err := c.client.Del(ctx2, keys...).Err(); err != nil {
 		return fmt.Errorf("redis: delete failed: %w", err)
 	}
 
@@ -200,7 +314,17 @@ func (c *Client) Delete(ctx context.Context, keys ...string) error {
 
 // Exists checks if a key exists in Redis.
 func (c *Client) Exists(ctx context.Context, keys ...string) (int64, error) {
-	n, err := c.client.Exists(ctx, keys...).Result()
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+
+	var n int64
+	err := enrichment.Do(ctx2, c.retryCfg, func() error {
+		var errInner error
+		n, errInner = c.client.Exists(ctx2, keys...).Result()
+		return errInner
+	})
 	if err != nil {
 		return 0, fmt.Errorf("redis: exists failed: %w", err)
 	}
@@ -223,12 +347,28 @@ func (c *Client) HGetWithTTL(ctx context.Context, key, field string, ttl time.Du
 		c.cache.Delete(cacheKey)
 	}
 
-	val, err := c.client.HGet(ctx, key, field).Result()
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+
+	var val string
+	// First attempt: if the field is missing (redis.Nil) propagate that to caller so
+	// they can distinguish missing vs empty values. For other errors, allow retries.
+	val, err := c.client.HGet(ctx2, key, field).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return "", nil
+			return "", redis.Nil
 		}
-		return "", fmt.Errorf("redis: hget failed: %w", err)
+		// transient error -> retry
+		err = enrichment.Do(ctx2, c.retryCfg, func() error {
+			var errInner error
+			val, errInner = c.client.HGet(ctx2, key, field).Result()
+			return errInner
+		})
+		if err != nil {
+			return "", fmt.Errorf("redis: hget failed: %w", err)
+		}
 	}
 
 	c.cache.SetWithTTL(cacheKey, val, ttl)
@@ -237,7 +377,12 @@ func (c *Client) HGetWithTTL(ctx context.Context, key, field string, ttl time.Du
 
 // HSet sets a field value in a Redis hash.
 func (c *Client) HSet(ctx context.Context, key, field, value string) error {
-	if err := c.client.HSet(ctx, key, field, value).Err(); err != nil {
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+	// HSet is a non-idempotent write. Do not retry by default to avoid data corruption.
+	if err := c.client.HSet(ctx2, key, field, value).Err(); err != nil {
 		return fmt.Errorf("redis: hset failed: %w", err)
 	}
 	// Invalidate cache for this field
@@ -248,7 +393,17 @@ func (c *Client) HSet(ctx context.Context, key, field, value string) error {
 
 // HGetAll retrieves all fields and values from a Redis hash.
 func (c *Client) HGetAll(ctx context.Context, key string) (map[string]string, error) {
-	vals, err := c.client.HGetAll(ctx, key).Result()
+	ctx2, cancel := c.ensureCtx(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+
+	var vals map[string]string
+	err := enrichment.Do(ctx2, c.retryCfg, func() error {
+		var errInner error
+		vals, errInner = c.client.HGetAll(ctx2, key).Result()
+		return errInner
+	})
 	if err != nil {
 		return nil, fmt.Errorf("redis: hgetall failed: %w", err)
 	}

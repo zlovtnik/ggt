@@ -94,6 +94,10 @@ type RedisEnrichment struct {
 	PoolSize   int           `yaml:"pool_size" json:"pool_size"`
 	CacheTTL   time.Duration `yaml:"cache_ttl" json:"cache_ttl"`
 	CacheSize  int           `yaml:"cache_size" json:"cache_size"`
+	// OperationTimeout applied to individual Redis operations when context has no deadline.
+	OperationTimeout time.Duration `yaml:"operation_timeout" json:"operation_timeout"`
+	// RetryCount controls how many attempts are made for transient Redis errors.
+	RetryCount int `yaml:"retry_count" json:"retry_count"`
 }
 
 type HTTPEnrichment struct {
@@ -113,6 +117,8 @@ type PostgresEnrichment struct {
 	MaxIdleConns    int           `yaml:"max_idle_conns" json:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime" json:"conn_max_lifetime"`
 	QueryTimeout    time.Duration `yaml:"query_timeout" json:"query_timeout"`
+	// RetryCount controls how many attempts are made for transient Postgres errors.
+	RetryCount int `yaml:"retry_count" json:"retry_count"`
 }
 
 type EnrichmentConfig struct {

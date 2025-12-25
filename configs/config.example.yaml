@@ -174,8 +174,10 @@ transforms:
 
         - type: data.convert
           config:
-            field: total_amount
-            to: float
+            fields:
+              - name: total_amount
+                from: string
+                to: float
 
         - type: data.format
           config:
@@ -210,11 +212,12 @@ transforms:
           config:
             source_field: raw_text
             pattern: "(?i)password=([\w-]+)"
-            replacement: "password=[REDACTED]"
-
         - type: data.mask
           config:
-            source_field: email
+            fields:
+              - email
+            mask_type: partial
+            preserve_length: false
             keep_prefix: 3
             mask_char: "*"
 
@@ -231,7 +234,7 @@ transforms:
 
         - type: filter.condition
           config:
-            expression: "payload.total_amount > 1000"
+            condition: "payload.total_amount > 1000"
 
         - type: filter.split
           config:
@@ -293,6 +296,11 @@ enrichment:
       password: ""
       db: 0
       max_retries: 3
+      # Operation timeout applied to individual Redis operations when no context deadline is present.
+      # Example: 5s
+      operation_timeout: 5s
+      # RetryCount controls how many attempts are made for transient Redis errors.
+      retry_count: 3
       pool_size: 10
   http:
     default_timeout: 1s
@@ -307,6 +315,8 @@ enrichment:
     max_idle_conns: 5
     conn_max_lifetime: 1h
     query_timeout: 10s
+    # RetryCount controls how many attempts are made for transient Postgres errors.
+    retry_count: 3
 
 metrics:
   namespace: transform_service
